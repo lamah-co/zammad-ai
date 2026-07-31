@@ -67,6 +67,10 @@ class ZammadPayloadParseError(ZammadPermanentError):
     """Raised when Zammad response payload parsing fails."""
 
 
+class UnsupportedReplyChannelError(ZammadPermanentError):
+    """Raised when a public answer cannot be mapped to a delivery channel."""
+
+
 class DLFError(AppError):
     """Base exception for DLF integration errors."""
 

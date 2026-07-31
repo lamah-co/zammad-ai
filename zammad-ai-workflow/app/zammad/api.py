@@ -8,7 +8,7 @@ from typing import Any, override
 
 from pydantic import TypeAdapter, ValidationError
 
-from app.errors import ZammadPayloadParseError
+from app.errors import UnsupportedReplyChannelError, ZammadPayloadParseError
 from app.models.zammad import (
     ArticleAttachment,
     ZammadAnswer,
@@ -42,7 +42,7 @@ class ZammadAPIClient(BaseZammadClient):
         )
         self.settings: ZammadAPISettings = settings
         # Set auth header
-        self.client.headers.update({"Authorization": f"Bearer {settings.auth_token.get_secret_value()}"})
+        self.client.headers.update({"Authorization": f"Token token={settings.auth_token.get_secret_value()}"})
 
         self.kb_id = settings.knowledge_base_id
         self.rss_token = settings.rss_feed_token
@@ -57,10 +57,67 @@ class ZammadAPIClient(BaseZammadClient):
         return ZammadTicket(id=id, articles=articles)
 
     @override
-    async def post_answer(self, ticket_id: int, text: str, subject: str | None = None, internal: bool = False) -> None:
-        payload = ZammadAnswer(ticket_id=ticket_id, body=text, internal=internal, subject=subject)
-        await self._request("POST", "/api/v1/ticket_articles", json=payload.model_dump())
+    async def post_answer(
+        self, ticket_id: int, text: str, subject: str | None = None, internal: bool = False
+    ) -> int | None:
+        payload = (
+            ZammadAnswer(
+                ticket_id=ticket_id,
+                body=text,
+                internal=True,
+                subject=subject,
+                type="note",
+            )
+            if internal
+            else await self._build_channel_reply(ticket_id=ticket_id, text=text, subject=subject)
+        )
+        response = await self._request(
+            "POST",
+            "/api/v1/ticket_articles",
+            json=payload.model_dump(by_alias=True, exclude_none=True),
+        )
         logger.info(f"Posted answer to ticket {ticket_id}")
+        return response.get("id") if isinstance(response, dict) and isinstance(response.get("id"), int) else None
+
+    async def _build_channel_reply(self, ticket_id: int, text: str, subject: str | None) -> ZammadAnswer:
+        ticket = await self.get_ticket(ticket_id)
+        customer_articles = [
+            article
+            for article in ticket.articles
+            if not article.internal and (article.sender or "").casefold() == "customer"
+        ]
+        if not customer_articles:
+            raise UnsupportedReplyChannelError(f"No public customer article found for ticket {ticket_id}")
+
+        source = max(customer_articles, key=lambda article: article.id)
+        channel = (source.type or "unknown").casefold()
+        if channel == "email":
+            if not source.from_:
+                raise UnsupportedReplyChannelError(f"Email article {source.id} has no customer address")
+            return ZammadAnswer(
+                ticket_id=ticket_id,
+                body=text,
+                internal=False,
+                subject=subject or source.subject,
+                type="email",
+                sender="Agent",
+                from_=source.to,
+                to=source.from_,
+                in_reply_to=source.message_id,
+            )
+        if channel == "whatsapp message":
+            return ZammadAnswer(
+                ticket_id=ticket_id,
+                body=text,
+                internal=False,
+                subject=subject,
+                content_type="text/plain",
+                type="whatsapp message",
+                sender="Agent",
+            )
+        raise UnsupportedReplyChannelError(
+            f"Unsupported customer reply channel '{source.type or 'unknown'}' for ticket {ticket_id}"
+        )
 
     @override
     async def update_ticket_group(self, ticket_id: int, group_id: int) -> None:
