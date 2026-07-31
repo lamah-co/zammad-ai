@@ -41,6 +41,20 @@ class AnswerOutput(BaseModel):
     )
 
 
+class ZammadTicketEventInput(BaseModel):
+    """A Zammad trigger event scoped to one newly created article."""
+
+    ticket_id: int = Field(description="Ticket containing the new customer article")
+    article_id: int = Field(description="New article that caused the Zammad trigger")
+
+
+class ZammadTicketEventOutput(BaseModel):
+    """Processing result returned to the Zammad webhook."""
+
+    status: str = Field(description="processed or ignored")
+    reason: str | None = Field(default=None, description="Reason an event was ignored")
+
+
 class HealthCheckResponse(BaseModel):
     """Health check response returned by the backend."""
 
