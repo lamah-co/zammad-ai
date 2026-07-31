@@ -3,7 +3,7 @@
 from logging import Logger
 
 from app.answer.service import AnswerService, get_answer_service
-from app.errors import ActionExecutionError, AppError
+from app.errors import ActionExecutionError, AppError, UnsupportedReplyChannelError
 from app.guardrails import GuardrailService, get_guardrail_service
 from app.models.answer import AnswerCandidate, NoAnswerPossible, StaticAnswer
 from app.models.guardrails import GuardrailResponseResult, GuardrailResult
@@ -72,12 +72,17 @@ class ActionService:
             elif triage.category.auto_publish and (
                 isinstance(response, StaticAnswer) or (isinstance(response, AnswerCandidate) and response.auto_publish)
             ):
-                await self.zammad_client.post_answer(
-                    ticket_id=ticket_id,
-                    text=response.response,
-                    subject=response.subject if isinstance(response, AnswerCandidate) else "Answer",
-                    internal=False,
-                )
+                try:
+                    await self.zammad_client.post_answer(
+                        ticket_id=ticket_id,
+                        text=response.response,
+                        subject=response.subject if isinstance(response, AnswerCandidate) else "Answer",
+                        internal=False,
+                    )
+                except UnsupportedReplyChannelError as error:
+                    await self.zammad_client.post_shared_draft(ticket_id=ticket_id, text=response.response)
+                    self.logger.warning(f"Saved answer as shared draft for ticket {ticket_id}: {error}")
+                    return
                 self.logger.info(f"Posted answer for ticket {ticket_id} with category {category}")
                 # Optionally schedule the ticket to be moved to a pending-close state after configured days
                 try:

@@ -72,8 +72,8 @@ class BaseZammadClient(ABC):
         text: str,
         subject: str | None = None,
         internal: bool = False,
-    ) -> None:
-        """Post an answer to the specified Zammad ticket.
+    ) -> int | None:
+        """Post an answer to the specified Zammad ticket and return its article ID when available.
 
         Args:
             ticket_id: ID of the ticket to update.

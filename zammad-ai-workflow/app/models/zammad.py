@@ -19,6 +19,17 @@ class ZammadTicket(BaseModel):
         default_factory=list,
     )
 
+    def latest_customer_article(self) -> "ZammadArticle | None":
+        """Return the newest public customer article, with legacy fallback."""
+        customer_articles = [
+            article
+            for article in self.articles
+            if not article.internal and (article.sender or "").casefold() == "customer"
+        ]
+        if customer_articles:
+            return max(customer_articles, key=lambda article: article.id)
+        return self.articles[0] if self.articles else None
+
 
 class ArticleAttachment(BaseModel):
     """Attachment metadata for a ticket article."""
@@ -60,6 +71,32 @@ class ZammadArticle(BaseModel):
         description="Subject of the article",
         default=None,
     )
+    type: str | None = Field(
+        description="Zammad article type, which identifies the communication channel",
+        default=None,
+    )
+    sender: str | None = Field(
+        description="Zammad sender role, for example Customer or Agent",
+        default=None,
+    )
+    from_: str | None = Field(
+        description="Sender address from the communication article",
+        default=None,
+        validation_alias=AliasChoices("from", "from_"),
+        serialization_alias="from",
+    )
+    to: str | None = Field(
+        description="Recipient address from the communication article",
+        default=None,
+    )
+    cc: str | None = Field(
+        description="Optional copied recipients from the communication article",
+        default=None,
+    )
+    message_id: str | None = Field(
+        description="Message ID used for communication threading",
+        default=None,
+    )
 
     @field_validator("text", mode="after")
     @classmethod
@@ -83,6 +120,16 @@ class ZammadAnswer(BaseModel):
     )
     subject: str | None = Field(default=None, description="Optional subject line for the answer")
     content_type: str = "text/html"
+    type: str = Field(description="Zammad article type used for delivery")
+    sender: str = Field(default="Agent", description="Zammad sender role")
+    from_: str | None = Field(
+        description="Outbound sender address",
+        default=None,
+        validation_alias=AliasChoices("from", "from_"),
+        serialization_alias="from",
+    )
+    to: str | None = Field(description="Outbound recipient address", default=None)
+    in_reply_to: str | None = Field(description="Message ID to reply to", default=None)
 
 
 class ZammadTagAdd(BaseModel):
