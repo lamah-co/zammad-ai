@@ -24,6 +24,7 @@ from app.utils.logging import getLogger
 from app.utils.status import set_status, track_activity
 
 from .v1.answer import answer_router
+from .v1.events import events_router
 from .v1.triage import triage_router
 
 logger: Logger = getLogger("zammad-ai.api.backend")
@@ -221,6 +222,11 @@ backend.include_router(
 
 backend.include_router(
     router=answer_router,
+    prefix="/api/v1",
+)
+
+backend.include_router(
+    router=events_router,
     prefix="/api/v1",
 )
 
