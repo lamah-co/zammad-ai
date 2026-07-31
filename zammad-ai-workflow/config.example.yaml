@@ -113,11 +113,15 @@ zammad:
 # Set secret in .env file:
 #   ZAMMAD_AI_ANSWER__QDRANT__API_KEY (required)
 answer:
+  strategy: "agent" # Options: "agent" (tool calling) or "direct_rag" (single completion after Qdrant retrieval)
   agent_prompt:
     type: "file" # Options: "string", "file", "langfuse"
     prompt: "prompts/answer/agent.prompt.md"
     # Prompts can use Jinja2 syntax! Variables like {{ available_tools }}, {{ knowledge_base_enabled }},
     # {{ dlf_enabled }}, {{ disclaimer }} are automatically available.
+  direct_rag_prompt:
+    type: "file"
+    prompt: "prompts/answer/direct_rag.prompt.md"
   qdrant:
     url: "https://your-qdrant-instance.example.com"
     api_key: null # Set in .env: ZAMMAD_AI_ANSWER__QDRANT__API_KEY
