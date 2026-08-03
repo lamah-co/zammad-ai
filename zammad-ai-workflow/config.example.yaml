@@ -24,7 +24,7 @@ usecase:
 # GenAI Configuration
 # ============================================================================
 genai:
-  sdk: "openai" # Options: "openai" or "anthropic"
+  sdk: "openai" # Options: "openai", "gemini", or "anthropic"
   max_retries: 3 # Maximum number of retries for API calls
   chat_model: "gpt-4.1-mini" # Model for chat completions
   triage_model: null # Optional override for triage model (fallback: chat_model)
@@ -60,6 +60,32 @@ genai:
 #  answer_temperature: 0.0 # Temperature for chat completions (0.0 = deterministic)
 #  judge_temperature: 0.0 # Temperature for chat completions (0.0 = deterministic)
 
+# Gemini-specific settings (use instead of the OpenAI block above)
+#  sdk: "gemini"
+#  max_retries: 3
+#  chat_model: "gemini-2.5-flash"
+#  triage_model: null
+#  answer_model: null
+#  judge_model: null
+#  embedding_model: "gemini-embedding-001"
+#  vertexai: false # true selects Vertex AI; false selects Gemini Developer API
+#  project: null # Required for Vertex AI unless GOOGLE_CLOUD_PROJECT is set
+#  location: null # Optional Vertex AI location
+#  base_url: null # Optional native Gemini gateway, not the OpenAI-compatible URL
+#  include_thoughts: false
+#  # Gemini 3: set one thinking_level per role (minimal, low, medium, high).
+#  triage_thinking_level: null
+#  answer_thinking_level: null
+#  judge_thinking_level: null
+#  # Gemini 2.5: use thinking_budget instead (-1 dynamic, 0 off where supported,
+#  # or a positive token limit). Do not set level and budget for the same role.
+#  triage_thinking_budget: -1
+#  answer_thinking_budget: -1
+#  judge_thinking_budget: -1
+#  triage_temperature: 0.0
+#  answer_temperature: 0.0
+#  judge_temperature: 0.0
+
 # Note: OpenAI SDK requires environment variables (set in .env):
 #   OPENAI_API_KEY (required)
 #   OPENAI_BASE_URL (optional, for custom endpoints/proxies)
@@ -68,6 +94,10 @@ genai:
 # using sdk: "anthropic":
 #   ANTHROPIC_API_KEY (required)
 #   ANTHROPIC_API_URL (optional, for custom endpoints/proxies)
+#
+# Note: Native Gemini requires environment variables (set in .env):
+#   GOOGLE_API_KEY (Gemini Developer API), or
+#   GOOGLE_GENAI_USE_VERTEXAI=true with Google Cloud credentials/project settings
 
 # ============================================================================
 # Zammad Configuration

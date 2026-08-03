@@ -29,10 +29,11 @@ log:
 # ---------------------------------------------------------------------------
 # GenAI / LLM
 # ---------------------------------------------------------------------------
-# Secrets (API key, base URL) must be provided via environment variables:
-#   ZAMMAD_AI_GENAI__API_KEY, ZAMMAD_AI_GENAI__BASE_URL
+# Provider credentials must be supplied through the provider SDK environment:
+#   OPENAI_API_KEY for sdk: openai
+#   GOOGLE_API_KEY for sdk: gemini
 genai:
-  # SDK backend to use. Currently only "openai" is supported.
+  # SDK backend to use. Options: openai | gemini
   sdk: openai
   # Maximum number of retry attempts for LLM calls.
   max_retries: 3
@@ -49,6 +50,8 @@ genai:
   temperature: 0.0
   # Model used to generate vector embeddings.
   embedding_model: text-embedding-3-large
+  # Optional native Gemini gateway. Do not use the OpenAI-compatible URL here.
+  # base_url: null
 
 # ---------------------------------------------------------------------------
 # Qdrant vector database
