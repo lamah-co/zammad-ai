@@ -26,6 +26,18 @@ def _make_fake_module(name: str, class_name: str):
     return m
 
 
+def _make_forbidden_module(name: str, class_name: str):
+    """Create a provider module whose constructor fails if it is selected."""
+    module = types.ModuleType(name)
+
+    class ForbiddenProvider:
+        def __init__(self, *args, **kwargs):
+            raise AssertionError(f"{class_name} must not be used for this provider")
+
+    setattr(module, class_name, ForbiddenProvider)
+    return module
+
+
 def test_get_chat_model_openai(monkeypatch):
     """Ensure an OpenAI chat model is constructed with expected kwargs."""
     # Provide fake langchain_openai module with ChatOpenAI
@@ -65,6 +77,11 @@ def test_get_chat_model_gemini_preserves_provider_configuration(monkeypatch):
     """Gemini chat must use the native provider and role-specific settings."""
     fake_mod = _make_fake_module("langchain_google_genai", "ChatGoogleGenerativeAI")
     monkeypatch.setitem(sys.modules, "langchain_google_genai", fake_mod)
+    monkeypatch.setitem(
+        sys.modules,
+        "langchain_openai",
+        _make_forbidden_module("langchain_openai", "ChatOpenAI"),
+    )
 
     from app.utils.genai_provider import get_chat_model
 
@@ -115,10 +132,37 @@ def test_gemini_settings_reject_conflicting_thinking_controls() -> None:
         )
 
 
+def test_gemini_settings_use_native_model_defaults() -> None:
+    """Selecting Gemini must not inherit OpenAI model defaults."""
+    settings = GenAIGeminiSettings()
+
+    assert settings.chat_model == "gemini-2.5-flash"
+    assert settings.embedding_model == "gemini-embedding-001"
+
+
+@pytest.mark.parametrize(
+    ("field", "model"),
+    [
+        ("chat_model", "gemini-2.5-flash"),
+        ("answer_model", "models/gemini-2.5-flash"),
+        ("embedding_model", "gemini-embedding-001"),
+    ],
+)
+def test_openai_settings_reject_gemini_models(field: str, model: str) -> None:
+    """Gemini model IDs must use the explicit Gemini provider."""
+    with pytest.raises(ValueError, match="sdk.*gemini"):
+        GenAIOpenAISettings.model_validate({field: model})
+
+
 def test_get_embedding_model_gemini_uses_native_dimensions(monkeypatch):
     """Gemini embeddings must use string-native provider calls and fixed output size."""
     fake_mod = _make_fake_module("langchain_google_genai", "GoogleGenerativeAIEmbeddings")
     monkeypatch.setitem(sys.modules, "langchain_google_genai", fake_mod)
+    monkeypatch.setitem(
+        sys.modules,
+        "langchain_openai",
+        _make_forbidden_module("langchain_openai", "OpenAIEmbeddings"),
+    )
 
     from app.utils.genai_provider import get_embedding_model
 

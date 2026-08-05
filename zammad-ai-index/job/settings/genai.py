@@ -2,7 +2,7 @@
 
 from typing import Literal
 
-from pydantic import BaseModel, Field, NonNegativeFloat, NonNegativeInt
+from pydantic import BaseModel, Field, NonNegativeFloat, NonNegativeInt, model_validator
 
 
 class BaseGenAISettings(BaseModel):
@@ -75,11 +75,29 @@ class GenAIOpenAISettings(BaseGenAISettings):
 
     sdk: Literal["openai"] = Field(description="GenAI SDK to use", default="openai")
 
+    @model_validator(mode="after")
+    def reject_gemini_models(self) -> "GenAIOpenAISettings":
+        """Require Gemini model IDs to use the native Gemini provider."""
+        model_fields = (
+            "chat_model",
+            "triage_model",
+            "answer_model",
+            "judge_model",
+            "embedding_model",
+        )
+        for field_name in model_fields:
+            model = getattr(self, field_name)
+            if model is not None and model.lower().removeprefix("models/").startswith("gemini-"):
+                raise ValueError(f"{field_name} uses a Gemini model; configure sdk: gemini")
+        return self
+
 
 class GenAIGeminiSettings(BaseGenAISettings):
     """Gemini embedding configuration using the native Google adapter."""
 
     sdk: Literal["gemini"] = Field(description="GenAI SDK to use", default="gemini")
+    chat_model: str = Field(default="gemini-2.5-flash", description="Native Gemini chat model")
+    embedding_model: str = Field(default="gemini-embedding-001", description="Native Gemini embedding model")
     base_url: str | None = Field(description="Optional custom Gemini API gateway", default=None)
 
 

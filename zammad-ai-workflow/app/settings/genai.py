@@ -78,6 +78,22 @@ class GenAIOpenAISettings(BaseGenAISettings):
         default=None,
     )
 
+    @model_validator(mode="after")
+    def reject_gemini_models(self) -> "GenAIOpenAISettings":
+        """Require Gemini model IDs to use the native Gemini provider."""
+        model_fields = (
+            "chat_model",
+            "triage_model",
+            "answer_model",
+            "judge_model",
+            "embedding_model",
+        )
+        for field_name in model_fields:
+            model = getattr(self, field_name)
+            if model is not None and model.lower().removeprefix("models/").startswith("gemini-"):
+                raise ValueError(f"{field_name} uses a Gemini model; configure sdk: gemini")
+        return self
+
     @property
     def triage_reasoning_config(self) -> dict[str, str] | None:
         """Constructs a reasoning configuration dictionary for LLM interactions based on the configured reasoning effort."""
@@ -116,6 +132,8 @@ class GenAIGeminiSettings(BaseGenAISettings):
     """Gemini configuration using LangChain's native Google Gen AI adapter."""
 
     sdk: Literal["gemini"] = Field(description="GenAI SDK to use", default="gemini")
+    chat_model: str = Field(default="gemini-2.5-flash", description="Native Gemini chat model")
+    embedding_model: str = Field(default="gemini-embedding-001", description="Native Gemini embedding model")
     vertexai: bool = Field(description="Use Vertex AI instead of the Gemini Developer API", default=False)
     project: str | None = Field(description="Google Cloud project for Vertex AI", default=None)
     location: str | None = Field(description="Google Cloud location for Vertex AI", default=None)
