@@ -100,10 +100,9 @@ LANGFUSE_HOST=...
 
 ## Native Gemini Agent
 
-Use `genai.sdk: gemini` when running Gemini models with
-`answer.strategy: agent`. The native adapter preserves Gemini thought
-signatures across LangChain tool calls. Do not point `ChatOpenAI` at Gemini's
-OpenAI-compatible endpoint for the multi-step agent path.
+Use `genai.sdk: gemini` when running Gemini models. The native adapter preserves
+Gemini message metadata across LangChain tool calls. `sdk: openai` is reserved
+for OpenAI models and rejects Gemini model IDs.
 
 See [Gemini agent configuration](gemini-agent.md) for complete workflow/index
-examples, migration, contract tests, and rollback.
+examples, migration, and contract tests.

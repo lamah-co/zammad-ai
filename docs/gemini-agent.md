@@ -1,8 +1,8 @@
 # Native Gemini Agent Configuration
 
-Use the native Gemini provider when `answer.strategy` is `agent`. It uses
-`langchain-google-genai` for chat and embeddings so Gemini tool-call thought
-signatures remain attached to the original LangChain `AIMessage` during replay.
+Use the native Gemini provider for the standard answer agent. It uses
+`langchain-google-genai` for chat and embeddings so Gemini tool-call metadata
+remains attached to the original LangChain `AIMessage` during replay.
 
 ## Credentials
 
@@ -44,9 +44,6 @@ genai:
   triage_temperature: 0.0
   answer_temperature: 0.0
   judge_temperature: 0.0
-
-answer:
-  strategy: agent
 ```
 
 For Gemini 3, remove every `*_thinking_budget` value and configure supported
@@ -120,38 +117,20 @@ original provider `AIMessage`; they do not log or fixture thought signatures.
 
 ## Migration From The Compatible Endpoint
 
-1. Retain `answer.strategy: direct_rag` and draft-only publication during the
-   migration.
-2. Add `GOOGLE_API_KEY` or Vertex AI credentials to runtime secret storage.
-3. Change workflow and index `genai.sdk` from `openai` to `gemini`.
-4. Remove Gemini's URL from `OPENAI_BASE_URL`; leave it only for real OpenAI
-   deployments.
-5. Configure approved Gemini chat and embedding model IDs.
-6. Confirm Qdrant vector dimension and rebuild the disposable index.
-7. Run live contract tests, then real Zammad draft-mode Arabic tests.
-8. Change `answer.strategy` to `agent` only after contract and acceptance tests
-   pass.
-9. Keep category `auto_publish: false` until channel and customer-end evidence
+1. Add `GOOGLE_API_KEY` or Vertex AI credentials to runtime secret storage.
+2. Change workflow and index `genai.sdk` from `openai` to `gemini`.
+3. Remove Gemini's URL and key from `OPENAI_BASE_URL` and `OPENAI_API_KEY`;
+   reserve those variables for real OpenAI deployments.
+4. Configure approved Gemini chat and embedding model IDs.
+5. Confirm Qdrant vector dimension and rebuild the disposable index.
+6. Run live contract tests, then real Zammad draft-mode Arabic tests.
+7. Keep category `auto_publish: false` until channel and customer-end evidence
    is approved.
 
-## Failure And Rollback
+## Provider Boundary
 
-Missing thought signatures, malformed function calls, and invalid tool history
-are classified as permanent provider protocol errors. Retrying an unchanged
-message history cannot repair them.
-
-On agent failure, retain human review and channel safety behavior. Do not turn a
-failed agent request into an automatically published free-form completion.
-
-Immediate rollback:
-
-```yaml
-answer:
-  strategy: direct_rag
-  judge:
-    max_repairs: 0
-```
-
-Rebuild/redeploy the previous immutable image when the failure is caused by a
-provider or dependency upgrade. Record the image digest, dependency lock,
-provider model ID, and sanitized error class in the incident evidence.
+`sdk: gemini` always selects `ChatGoogleGenerativeAI` and
+`GoogleGenerativeAIEmbeddings`. `sdk: openai` selects the OpenAI adapters and
+rejects Gemini model IDs. The workflow does not reconstruct Gemini messages or
+implement provider-specific thought-signature handling; the native integration
+preserves the original `AIMessage` during the agent tool loop.
