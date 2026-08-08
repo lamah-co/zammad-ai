@@ -11,13 +11,6 @@ def get_embedding_model(genai_settings: GenAIProviderSettings, vector_dimension:
         case "gemini":
             from langchain_google_genai import GoogleGenerativeAIEmbeddings
 
-            if genai_settings.base_url is not None:
-                return GoogleGenerativeAIEmbeddings(
-                    model=genai_settings.embedding_model,
-                    output_dimensionality=vector_dimension,
-                    base_url=genai_settings.base_url,
-                    vertexai=False,
-                )
             return GoogleGenerativeAIEmbeddings(
                 model=genai_settings.embedding_model,
                 output_dimensionality=vector_dimension,

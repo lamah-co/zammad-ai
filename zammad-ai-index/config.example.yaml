@@ -50,9 +50,6 @@ genai:
   temperature: 0.0
   # Model used to generate vector embeddings.
   embedding_model: text-embedding-3-large
-  # Optional native Gemini gateway. Do not use the OpenAI-compatible URL here.
-  # base_url: null
-
 # ---------------------------------------------------------------------------
 # Qdrant vector database
 # ---------------------------------------------------------------------------

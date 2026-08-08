@@ -118,7 +118,6 @@ class GenAIGeminiSettings(BaseGenAISettings):
     sdk: Literal["gemini"] = Field(description="GenAI SDK to use", default="gemini")
     chat_model: str = Field(default="gemini-2.5-flash", description="Native Gemini chat model")
     embedding_model: str = Field(default="gemini-embedding-001", description="Native Gemini embedding model")
-    base_url: str | None = Field(description="Optional custom Gemini API gateway", default=None)
     include_thoughts: bool = Field(description="Expose Gemini thought summaries in model responses", default=False)
 
     triage_thinking_level: ThinkingLevel | None = None

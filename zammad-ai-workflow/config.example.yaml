@@ -68,7 +68,6 @@ genai:
 #  answer_model: null
 #  judge_model: null
 #  embedding_model: "gemini-embedding-001"
-#  base_url: null # Optional native Gemini gateway, not the OpenAI-compatible URL
 #  include_thoughts: false
 #  # Gemini 3: set one thinking_level per role (minimal, low, medium, high).
 #  triage_thinking_level: null

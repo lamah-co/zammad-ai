@@ -81,7 +81,6 @@ class GenAIGeminiSettings(BaseGenAISettings):
     sdk: Literal["gemini"] = Field(description="GenAI SDK to use", default="gemini")
     chat_model: str = Field(default="gemini-2.5-flash", description="Native Gemini chat model")
     embedding_model: str = Field(default="gemini-embedding-001", description="Native Gemini embedding model")
-    base_url: str | None = Field(description="Optional custom Gemini API gateway", default=None)
 
 
 GenAIProviderSettings = GenAIOpenAISettings | GenAIGeminiSettings
