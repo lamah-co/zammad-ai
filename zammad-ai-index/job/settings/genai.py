@@ -83,7 +83,4 @@ class GenAIGeminiSettings(BaseGenAISettings):
     embedding_model: str = Field(default="gemini-embedding-001", description="Native Gemini embedding model")
 
 
-GenAIProviderSettings = GenAIOpenAISettings | GenAIGeminiSettings
-
-# Backwards-compatible import for callers constructing the previous default.
-GenAISettings = GenAIOpenAISettings
+GenAISettings = GenAIOpenAISettings | GenAIGeminiSettings

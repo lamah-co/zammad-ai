@@ -2,10 +2,10 @@
 
 from langchain_core.embeddings import Embeddings
 
-from job.settings.genai import GenAIProviderSettings
+from job.settings.genai import GenAISettings
 
 
-def get_embedding_model(genai_settings: GenAIProviderSettings, vector_dimension: int) -> Embeddings:
+def get_embedding_model(genai_settings: GenAISettings, vector_dimension: int) -> Embeddings:
     """Construct a provider-native embedding model with an explicit output size."""
     match genai_settings.sdk:
         case "gemini":
