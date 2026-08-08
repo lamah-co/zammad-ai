@@ -47,6 +47,7 @@ def test_get_embedding_model_gemini(monkeypatch) -> None:
     assert getattr(model, "_init_kwargs") == {
         "model": "gemini-embedding-001",
         "output_dimensionality": 768,
+        "vertexai": False,
     }
 
 

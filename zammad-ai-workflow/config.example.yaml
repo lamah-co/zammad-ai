@@ -68,9 +68,6 @@ genai:
 #  answer_model: null
 #  judge_model: null
 #  embedding_model: "gemini-embedding-001"
-#  vertexai: false # true selects Vertex AI; false selects Gemini Developer API
-#  project: null # Required for Vertex AI unless GOOGLE_CLOUD_PROJECT is set
-#  location: null # Optional Vertex AI location
 #  base_url: null # Optional native Gemini gateway, not the OpenAI-compatible URL
 #  include_thoughts: false
 #  # Gemini 3: set one thinking_level per role (minimal, low, medium, high).
@@ -96,8 +93,7 @@ genai:
 #   ANTHROPIC_API_URL (optional, for custom endpoints/proxies)
 #
 # Note: Native Gemini requires environment variables (set in .env):
-#   GOOGLE_API_KEY (Gemini Developer API), or
-#   GOOGLE_GENAI_USE_VERTEXAI=true with Google Cloud credentials/project settings
+#   GOOGLE_API_KEY (Gemini Developer API)
 
 # ============================================================================
 # Zammad Configuration

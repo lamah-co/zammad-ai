@@ -119,12 +119,10 @@ def get_chat_model(genai_settings: GenAIProviderSettings, role: Literal["triage"
                     "temperature": temperature,
                     "max_retries": genai_settings.max_retries,
                     "include_thoughts": genai_settings.include_thoughts,
-                    "vertexai": genai_settings.vertexai,
+                    "vertexai": False,
                 }
-                for name in ("project", "location", "base_url"):
-                    value = getattr(genai_settings, name)
-                    if value is not None:
-                        kwargs[name] = value
+                if genai_settings.base_url is not None:
+                    kwargs["base_url"] = genai_settings.base_url
                 if thinking_level is not None:
                     kwargs["thinking_level"] = thinking_level
                 if thinking_budget is not None:
@@ -148,10 +146,12 @@ def get_embedding_model(genai_settings: GenAIProviderSettings, vector_dimension:
                     model=genai_settings.embedding_model,
                     output_dimensionality=vector_dimension,
                     base_url=genai_settings.base_url,
+                    vertexai=False,
                 )
             return GoogleGenerativeAIEmbeddings(
                 model=genai_settings.embedding_model,
                 output_dimensionality=vector_dimension,
+                vertexai=False,
             )
         case "openai" | "anthropic":
             from langchain_openai import OpenAIEmbeddings

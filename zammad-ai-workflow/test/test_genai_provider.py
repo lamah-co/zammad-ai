@@ -90,7 +90,6 @@ def test_get_chat_model_gemini_preserves_provider_configuration(monkeypatch):
         answer_model="gemini-answer",
         answer_thinking_budget=1024,
         include_thoughts=False,
-        vertexai=False,
     )
 
     model = get_chat_model(settings, "answer")
@@ -158,6 +157,7 @@ def test_get_embedding_model_gemini_uses_native_dimensions(monkeypatch):
     assert getattr(model, "_init_kwargs") == {
         "model": "gemini-embedding-001",
         "output_dimensionality": 768,
+        "vertexai": False,
     }
 
 

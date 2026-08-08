@@ -12,14 +12,6 @@ For the Gemini Developer API, inject this secret at runtime:
 GOOGLE_API_KEY=<secret>
 ```
 
-For Vertex AI, use workload identity or approved Google Cloud credentials and:
-
-```env
-GOOGLE_GENAI_USE_VERTEXAI=true
-GOOGLE_CLOUD_PROJECT=<project-id>
-GOOGLE_CLOUD_LOCATION=us-central1
-```
-
 Do not commit these values. `OPENAI_BASE_URL` is not used by the native Gemini
 adapter.
 
@@ -36,7 +28,6 @@ genai:
   answer_model: gemini-2.5-flash
   judge_model: gemini-2.5-flash
   embedding_model: gemini-embedding-001
-  vertexai: false
   include_thoughts: false
   triage_thinking_budget: -1
   answer_thinking_budget: -1
@@ -117,7 +108,7 @@ original provider `AIMessage`; they do not log or fixture thought signatures.
 
 ## Migration From The Compatible Endpoint
 
-1. Add `GOOGLE_API_KEY` or Vertex AI credentials to runtime secret storage.
+1. Add `GOOGLE_API_KEY` to runtime secret storage.
 2. Change workflow and index `genai.sdk` from `openai` to `gemini`.
 3. Remove Gemini's URL and key from `OPENAI_BASE_URL` and `OPENAI_API_KEY`;
    reserve those variables for real OpenAI deployments.
