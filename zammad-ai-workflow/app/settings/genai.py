@@ -78,22 +78,6 @@ class GenAIOpenAISettings(BaseGenAISettings):
         default=None,
     )
 
-    @model_validator(mode="after")
-    def reject_gemini_models(self) -> "GenAIOpenAISettings":
-        """Require Gemini model IDs to use the native Gemini provider."""
-        model_fields = (
-            "chat_model",
-            "triage_model",
-            "answer_model",
-            "judge_model",
-            "embedding_model",
-        )
-        for field_name in model_fields:
-            model = getattr(self, field_name)
-            if model is not None and model.lower().removeprefix("models/").startswith("gemini-"):
-                raise ValueError(f"{field_name} uses a Gemini model; configure sdk: gemini")
-        return self
-
     @property
     def triage_reasoning_config(self) -> dict[str, str] | None:
         """Constructs a reasoning configuration dictionary for LLM interactions based on the configured reasoning effort."""

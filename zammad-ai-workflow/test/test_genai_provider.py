@@ -140,20 +140,6 @@ def test_gemini_settings_use_native_model_defaults() -> None:
     assert settings.embedding_model == "gemini-embedding-001"
 
 
-@pytest.mark.parametrize(
-    ("field", "model"),
-    [
-        ("chat_model", "gemini-2.5-flash"),
-        ("answer_model", "models/gemini-2.5-flash"),
-        ("embedding_model", "gemini-embedding-001"),
-    ],
-)
-def test_openai_settings_reject_gemini_models(field: str, model: str) -> None:
-    """Gemini model IDs must use the explicit Gemini provider."""
-    with pytest.raises(ValueError, match="sdk.*gemini"):
-        GenAIOpenAISettings.model_validate({field: model})
-
-
 def test_get_embedding_model_gemini_uses_native_dimensions(monkeypatch):
     """Gemini embeddings must use string-native provider calls and fixed output size."""
     fake_mod = _make_fake_module("langchain_google_genai", "GoogleGenerativeAIEmbeddings")
