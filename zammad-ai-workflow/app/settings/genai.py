@@ -120,16 +120,37 @@ class GenAIGeminiSettings(BaseGenAISettings):
     embedding_model: str = Field(default="gemini-embedding-001", description="Native Gemini embedding model")
     include_thoughts: bool = Field(description="Expose Gemini thought summaries in model responses", default=False)
 
-    triage_thinking_level: ThinkingLevel | None = None
-    answer_thinking_level: ThinkingLevel | None = None
-    judge_thinking_level: ThinkingLevel | None = None
-    triage_thinking_budget: int | None = Field(default=None, ge=-1)
-    answer_thinking_budget: int | None = Field(default=None, ge=-1)
-    judge_thinking_budget: int | None = Field(default=None, ge=-1)
+    triage_thinking_level: ThinkingLevel | None = Field(
+        default=None,
+        description="Gemini 3+ thinking level for triage",
+    )
+    answer_thinking_level: ThinkingLevel | None = Field(
+        default=None,
+        description="Gemini 3+ thinking level for answer generation",
+    )
+    judge_thinking_level: ThinkingLevel | None = Field(
+        default=None,
+        description="Gemini 3+ thinking level for answer evaluation",
+    )
+    triage_thinking_budget: int | None = Field(
+        default=None,
+        ge=-1,
+        description="Gemini 2.5 thinking token budget for triage",
+    )
+    answer_thinking_budget: int | None = Field(
+        default=None,
+        ge=-1,
+        description="Gemini 2.5 thinking token budget for answer generation",
+    )
+    judge_thinking_budget: int | None = Field(
+        default=None,
+        ge=-1,
+        description="Gemini 2.5 thinking token budget for answer evaluation",
+    )
 
     @model_validator(mode="after")
     def validate_thinking_controls(self) -> "GenAIGeminiSettings":
-        """Reject simultaneous Gemini 2.5 and Gemini 3 thinking controls."""
+        """Reject simultaneous Gemini 2.5 and Gemini 3+ thinking controls."""
         for role in ("triage", "answer", "judge"):
             if (
                 getattr(self, f"{role}_thinking_level") is not None

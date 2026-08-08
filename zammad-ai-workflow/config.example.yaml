@@ -69,7 +69,7 @@ genai:
 #  judge_model: null
 #  embedding_model: "gemini-embedding-001"
 #  include_thoughts: false
-#  # Gemini 3: set one thinking_level per role (minimal, low, medium, high).
+#  # Gemini 3+: set one thinking_level per role (minimal, low, medium, high).
 #  triage_thinking_level: null
 #  answer_thinking_level: null
 #  judge_thinking_level: null

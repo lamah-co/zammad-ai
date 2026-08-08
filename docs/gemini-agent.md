@@ -37,7 +37,7 @@ genai:
   judge_temperature: 0.0
 ```
 
-For Gemini 3, remove every `*_thinking_budget` value and configure supported
+For Gemini 3 and later, remove every `*_thinking_budget` value and configure supported
 role-specific levels instead:
 
 ```yaml
@@ -49,7 +49,14 @@ genai:
   judge_thinking_level: low
 ```
 
-The settings validator rejects a level and budget configured for the same role.
+| Model family | Supported control | Values |
+| --- | --- | --- |
+| Gemini 2.5 | `*_thinking_budget` | `-1` for dynamic thinking, `0` where disabling is supported, or a positive token limit |
+| Gemini 3+ | `*_thinking_level` | Model-supported values from `minimal`, `low`, `medium`, and `high` |
+
+Gemini 2.5 does not use `thinking_level`. For Gemini 3+, prefer
+`thinking_level` rather than the backwards-compatible budget parameter. The
+settings validator rejects a level and budget configured for the same role.
 Keep `include_thoughts: false` unless reasoning summaries are explicitly needed
 and approved for logs/traces.
 
