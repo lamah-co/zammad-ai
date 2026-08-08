@@ -180,10 +180,24 @@ class DLFSettings(BaseModel):
 class AnswerSettings(BaseModel):
     """Settings for the answer-generation pipeline."""
 
+    strategy: Literal["agent", "direct_rag"] = Field(
+        default="agent",
+        description=(
+            "Answer orchestration strategy. direct_rag avoids model tool calls for compatible endpoints."
+        ),
+    )
+
     agent_prompt: PromptSourceConfig = Field(
         description="Prompt configuration for the answer generation agent. Can be provided as a raw string, a file path, or a Langfuse prompt reference.",
         default_factory=lambda: FilePromptConfig(
             prompt=get_prompts_dir() / "answer" / "agent.prompt.md",
+        ),
+        discriminator="type",
+    )
+    direct_rag_prompt: PromptSourceConfig = Field(
+        description="System prompt used by the direct RAG answer strategy.",
+        default_factory=lambda: FilePromptConfig(
+            prompt=get_prompts_dir() / "answer" / "direct_rag.prompt.md",
         ),
         discriminator="type",
     )
@@ -230,4 +244,15 @@ class AnswerSettings(BaseModel):
                 + "\n".join(conflict_lines)
             )
 
+        return self
+
+    @model_validator(mode="after")
+    def validate_direct_rag_features(self) -> "AnswerSettings":
+        """Reject agent-only integrations when direct RAG is selected."""
+        if self.strategy == "direct_rag" and self.dlf is not None:
+            raise ValueError("answer.dlf is not supported with answer.strategy=direct_rag")
+        if self.strategy == "direct_rag" and self.laws:
+            raise ValueError("answer.laws are not supported with answer.strategy=direct_rag")
+        if self.strategy == "direct_rag" and self.judge.max_repairs:
+            raise ValueError("answer.judge.max_repairs must be 0 with answer.strategy=direct_rag")
         return self

@@ -59,7 +59,7 @@ class ZammadAIIndexSettings(BaseSettings):
         default_factory=lambda: IndexJobSettings(),
     )
 
-    genai: GenAISettings = Field(
+    genai: GenAIProviderSettings = Field(
         description="Settings for GenAI integration, including model selection and configuration.",
         default_factory=lambda: GenAIOpenAISettings(),
         discriminator="sdk",

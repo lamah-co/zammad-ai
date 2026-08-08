@@ -4,7 +4,8 @@ from logging import Logger
 from time import perf_counter
 
 from langchain.agents.middleware.types import AgentState
-from langchain.messages import HumanMessage
+from langchain.messages import HumanMessage, SystemMessage
+from langchain_core.documents import Document
 from langchain_core.prompts import PromptTemplate
 from langchain_core.runnables.config import RunnableConfig
 from langfuse import observe, propagate_attributes
@@ -22,6 +23,7 @@ from app.settings.answer import (
     StringPromptConfig,
 )
 from app.utils.context_builders import build_answer_context, build_judge_context, merge_contexts
+from app.utils.genai_provider import get_chat_model
 from app.utils.jinja2 import PromptTemplateRenderer, get_template_renderer
 from app.utils.langchain import extract_structured_response, with_recursion_limit
 from app.utils.logging import getLogger
@@ -78,9 +80,15 @@ class AnswerService:
         if settings.langfuse_enabled:
             self.langfuse_client = LangfuseClient()
 
+        self.answer_strategy = settings.answer.strategy
+        answer_prompt_config = (
+            settings.answer.direct_rag_prompt
+            if self.answer_strategy == "direct_rag"
+            else settings.answer.agent_prompt
+        )
         self.agent_prompt, self.agent_prompt_version = self._resolve_prompt(
-            prompt_config=settings.answer.agent_prompt,
-            prompt_source_name="agent system prompt",
+            prompt_config=answer_prompt_config,
+            prompt_source_name=f"{self.answer_strategy} system prompt",
         )
 
         self.judge_settings: JudgeSettings = settings.answer.judge
@@ -109,11 +117,20 @@ class AnswerService:
 
         self.agent: CompiledStateGraph[
             AgentState[AnswerCandidate], AgentContext, AgentState, AgentState[AnswerCandidate]  # type: ignore
-        ] = build_agent(
-            genai_settings=settings.genai,
-            system_prompt=self.agent_prompt,
-            dlf_enabled=settings.answer.dlf is not None,
-            laws=settings.answer.laws,
+        ] | None = (
+            build_agent(
+                genai_settings=settings.genai,
+                system_prompt=self.agent_prompt,
+                dlf_enabled=settings.answer.dlf is not None,
+                laws=settings.answer.laws,
+            )
+            if self.answer_strategy == "agent"
+            else None
+        )
+        self.direct_rag_model = (
+            get_chat_model(settings.genai, "answer")
+            if self.answer_strategy == "direct_rag"
+            else None
         )
         self.qdrant_kb_client = QdrantKBClient(
             genai_settings=settings.genai,
@@ -163,11 +180,20 @@ class AnswerService:
                 else RunnableConfig()
             )
             with propagate_attributes(session_id=session_id):
-                agent_result = await self.agent.ainvoke(
-                    input={"messages": [user_message]},
-                    config=with_recursion_limit(config),
-                    context=self.agent_context,
-                )
+                if self.answer_strategy == "direct_rag":
+                    agent_result = await self._generate_direct_rag(
+                        user_text=user_text,
+                        category=category,
+                        config=config,
+                    )
+                else:
+                    if self.agent is None:
+                        raise AnswerServiceError("Answer agent is not initialized", retryable=False)
+                    agent_result = await self.agent.ainvoke(
+                        input={"messages": [user_message]},
+                        config=with_recursion_limit(config),
+                        context=self.agent_context,
+                    )
 
                 
             agent_structured_response: AnswerCandidate | NoAnswerPossible = extract_structured_response(
@@ -197,6 +223,57 @@ class AnswerService:
         finally:
             ANSWER_RUN_DURATION_SECONDS.labels(outcome=outcome).observe(perf_counter() - start_time)
             ANSWER_RUNS_IN_PROGRESS.dec()
+
+    async def _generate_direct_rag(
+        self,
+        user_text: str,
+        category: str,
+        config: RunnableConfig,
+    ) -> dict:
+        """Retrieve context explicitly and invoke a model without LangChain tools."""
+        documents_with_scores = await self.qdrant_kb_client.asearch_documents(
+            query=user_text,
+            k=self.settings.answer.qdrant.retrieval_num_documents,
+        )
+        if not documents_with_scores:
+            return {
+                "structured_response": NoAnswerPossible(
+                    reasoning=(
+                        "No relevant knowledge-base documents were found for this request. "
+                        "The ticket must be reviewed by a human support agent before any customer reply is sent."
+                    )
+                )
+            }
+
+        context_parts: list[str] = []
+        for index, (document, score) in enumerate(documents_with_scores, start=1):
+            context_parts.append(
+                self._format_direct_rag_document(index=index, document=document, score=score)
+            )
+        direct_message = HumanMessage(
+            content=(
+                f"Category: {category}\nCustomer question: {user_text}\n\n"
+                "Retrieved knowledge-base context:\n\n" + "\n\n".join(context_parts)
+            )
+        )
+        if self.direct_rag_model is None:
+            raise AnswerServiceError("Direct RAG model is not initialized", retryable=False)
+        response = await self.direct_rag_model.ainvoke(
+            [SystemMessage(content=self.agent_prompt), direct_message],
+            config=config,
+        )
+        return {"messages": [response]}
+
+    @staticmethod
+    def _format_direct_rag_document(index: int, document: Document, score: float) -> str:
+        title = document.metadata.get("title") or document.metadata.get("name") or f"Document {index}"
+        url = (
+            document.metadata.get("url")
+            or document.metadata.get("source_url")
+            or document.metadata.get("source")
+            or ""
+        )
+        return f"[{index}] {title}\nURL: {url}\nRelevance: {score:.3f}\nContent:\n{document.page_content}"
 
     @observe(as_type="span")
     async def _judge_and_repair(
@@ -244,6 +321,8 @@ class AnswerService:
                     repair_instructions=judgment.repair_instructions or "Please improve the answer.",
                 )
             )
+            if self.agent is None:
+                raise AnswerServiceError("Answer agent is not initialized for repair", retryable=False)
             with propagate_attributes(session_id=session_id):
                 agent_result: dict = await self.agent.ainvoke(
                     input={"messages": messages + [repair_message]},

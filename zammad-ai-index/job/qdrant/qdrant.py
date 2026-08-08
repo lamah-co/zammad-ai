@@ -15,7 +15,7 @@ from qdrant_client.http.models.models import Record
 from qdrant_client.models import SnapshotDescription
 
 from job.models.qdrant import QdrantDocumentItem
-from job.settings.genai import GenAISettings
+from job.settings.genai import GenAIProviderSettings
 from job.settings.settings import QdrantSettings, ZammadAIIndexSettings
 from job.utils.genai_provider import get_embedding_model
 from job.utils.logging import getLogger
@@ -43,7 +43,7 @@ class QdrantKBClient:
         self.collection_name: str = settings.qdrant.collection_name
         self.settings: ZammadAIIndexSettings = settings
         self.qdrant_settings: QdrantSettings = settings.qdrant
-        self.genai_settings: GenAISettings = settings.genai
+        self.genai_settings: GenAIProviderSettings = settings.genai
         # Create sync + async Qdrant client with appropriate configuration
         self.client = QdrantClient(
             url=self.qdrant_settings.url.encoded_string(),
