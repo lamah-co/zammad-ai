@@ -12,6 +12,7 @@ from app.models.zammad import ZammadArticle, ZammadTicket
 
 @pytest.mark.asyncio
 async def test_customer_article_event_runs_triage_and_action() -> None:
+    """A customer article event must run triage and its selected action."""
     ticket = ZammadTicket(
         id=42,
         articles=[
@@ -45,6 +46,7 @@ async def test_customer_article_event_runs_triage_and_action() -> None:
 
 @pytest.mark.asyncio
 async def test_agent_article_event_is_ignored() -> None:
+    """Agent-authored article events must not trigger the AI workflow."""
     ticket = ZammadTicket(
         id=42,
         articles=[

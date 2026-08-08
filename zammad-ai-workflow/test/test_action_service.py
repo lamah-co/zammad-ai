@@ -14,6 +14,7 @@ from app.settings.triage import Action, ActionTypes, Category
 
 @pytest.mark.asyncio
 async def test_unsupported_reply_channel_becomes_shared_draft() -> None:
+    """Unsupported customer channels must fall back to a shared draft."""
     service = object.__new__(ActionService)
     service.settings = SimpleNamespace(zammad=SimpleNamespace(pending_close_after_days=None))
     service.get_answer = AsyncMock(return_value=StaticAnswer(response="A reviewed answer"))

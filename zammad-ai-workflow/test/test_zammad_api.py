@@ -24,6 +24,7 @@ def _json(request: httpx.Request) -> dict:
 
 
 def test_ticket_selects_latest_public_customer_article() -> None:
+    """The latest public customer article determines the reply channel."""
     ticket = ZammadTicket(
         id=42,
         articles=[
@@ -39,6 +40,7 @@ def test_ticket_selects_latest_public_customer_article() -> None:
 
 @pytest.mark.asyncio
 async def test_post_answer_replies_through_email_channel() -> None:
+    """Public answers to email tickets must use the email channel."""
     requests: list[httpx.Request] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -90,6 +92,7 @@ async def test_post_answer_replies_through_email_channel() -> None:
 
 @pytest.mark.asyncio
 async def test_post_answer_replies_through_whatsapp_channel() -> None:
+    """Public answers to WhatsApp tickets must use the WhatsApp channel."""
     requests: list[httpx.Request] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -134,6 +137,7 @@ async def test_post_answer_replies_through_whatsapp_channel() -> None:
 
 @pytest.mark.asyncio
 async def test_internal_answer_is_an_explicit_note_without_channel_lookup() -> None:
+    """Internal answers must remain notes without customer-channel lookup."""
     requests: list[httpx.Request] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -158,6 +162,7 @@ async def test_internal_answer_is_an_explicit_note_without_channel_lookup() -> N
 
 @pytest.mark.asyncio
 async def test_public_answer_rejects_unsupported_customer_channel() -> None:
+    """Public delivery must reject channels unsupported by Zammad replies."""
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(
             200,
