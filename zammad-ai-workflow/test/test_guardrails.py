@@ -1,4 +1,5 @@
 """Tests for the HTTP-based guardrail client service."""
+
 import httpx
 import pytest
 from pydantic import HttpUrl
@@ -10,7 +11,7 @@ from app.settings.guardrails import GuardrailSettings
 
 @pytest.fixture
 def guardrail_settings() -> GuardrailSettings:
-    """Create guardrail settings for testing (enabled and pointing to dummy base_url)."""
+    """Create guardrail settings for testing."""
     return GuardrailSettings(
         enabled=True,
         confidence_threshold=0.7,
@@ -103,7 +104,6 @@ async def test_guardrail_http_prompt_success(guardrail_settings: GuardrailSettin
             )
         return httpx.Response(404)
 
-    # Patch internal client to use MockTransport
     transport = httpx.MockTransport(handler)
     service._client = httpx.AsyncClient(transport=transport, base_url="http://testserver", timeout=2.0)
 
@@ -143,7 +143,7 @@ async def test_guardrail_http_response_success(guardrail_settings: GuardrailSett
 
 @pytest.mark.asyncio
 async def test_guardrail_http_error_fail_open(guardrail_settings: GuardrailSettings) -> None:
-    """Client fails open (safe) on HTTP errors."""
+    """Client fails open on HTTP errors."""
     service = GuardrailService(guardrail_settings)
 
     def handler(request: httpx.Request) -> httpx.Response:

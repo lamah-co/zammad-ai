@@ -1,7 +1,6 @@
 """Models for guardrail evaluation results."""
 
 from collections.abc import Sequence
-
 from pydantic import BaseModel, Field, field_validator
 
 

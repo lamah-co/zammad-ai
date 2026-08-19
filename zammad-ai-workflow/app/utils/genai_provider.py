@@ -2,13 +2,12 @@
 
 from __future__ import annotations
 
-from logging import Logger
+import logging
 from typing import Literal
 
-from app.settings.genai import GenAIAnthropicSettings, GenAIOpenAISettings, GenAIProviderSettings
-from app.utils.logging import getLogger
+from app.settings.genai import GenAIAnthropicSettings, GenAIGeminiSettings, GenAIOpenAISettings, GenAIProviderSettings
 
-logger: Logger = getLogger("zammad-ai.genai_provider")
+logger = logging.getLogger("zammad-ai.genai_provider")
 
 
 def _openai_role_config(genai_settings: GenAIOpenAISettings, role: Literal["triage", "answer", "judge"]):
@@ -52,6 +51,25 @@ def _anthropic_role_config(genai_settings: GenAIAnthropicSettings, role: Literal
     return model, temp, genai_settings.max_retries, thinking, effort
 
 
+def _gemini_role_config(genai_settings: GenAIGeminiSettings, role: Literal["triage", "answer", "judge"]):
+    """Return Gemini model name, temperature and thinking config for a specific role."""
+    if role == "triage":
+        model = genai_settings.triage_model or genai_settings.chat_model
+        temp = genai_settings.triage_temperature
+        thinking_budget = genai_settings.triage_thinking_budget
+    elif role == "answer":
+        model = genai_settings.answer_model or genai_settings.chat_model
+        temp = genai_settings.answer_temperature
+        thinking_budget = genai_settings.answer_thinking_budget
+    elif role == "judge":
+        model = genai_settings.judge_model or genai_settings.chat_model
+        temp = genai_settings.judge_temperature
+        thinking_budget = genai_settings.judge_thinking_budget
+    else:
+        raise ValueError(f"Unknown role: {role}")
+    return model, temp, genai_settings.max_retries, thinking_budget
+
+
 def get_chat_model(genai_settings: GenAIProviderSettings, role: Literal["triage", "answer", "judge"]):
     """Construct a LangChain chat model instance for the configured SDK."""
     match genai_settings.sdk:
@@ -85,6 +103,24 @@ def get_chat_model(genai_settings: GenAIProviderSettings, role: Literal["triage"
                 return chat
             except ImportError:
                 logger.error("langchain_anthropic and anthropic SDK are required for sdk 'anthropic'", exc_info=True)
+                raise
+        case "gemini":
+            model_name, temperature, max_retries, thinking_budget = _gemini_role_config(genai_settings, role)
+            try:
+                from langchain_google_genai import ChatGoogleGenerativeAI
+
+                model_kwargs = {}
+                if thinking_budget is not None:
+                    model_kwargs["thinking_budget"] = thinking_budget
+                chat = ChatGoogleGenerativeAI(
+                    model=model_name,
+                    temperature=temperature,
+                    max_retries=max_retries,
+                    **model_kwargs,
+                )
+                return chat
+            except ImportError:
+                logger.error("langchain_google_genai is required for sdk 'gemini'", exc_info=True)
                 raise
         case _:
             raise ValueError(f"Unsupported GenAI SDK: {genai_settings.sdk}")

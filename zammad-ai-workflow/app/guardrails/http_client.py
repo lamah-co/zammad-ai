@@ -50,7 +50,6 @@ class GuardrailService:
         if not self.settings.enabled:
             return SAFE_PROMPT_RESULT
 
-        # Skip empty text to avoid unnecessary calls
         if not text or not text.strip():
             logger.debug("Guardrail skipped for empty text")
             return SAFE_PROMPT_RESULT
@@ -65,10 +64,8 @@ class GuardrailService:
             resp: Response = await self._client.post(url, json=payload)
             resp.raise_for_status()
             data: Any = resp.json()
-            # Coerce using our Pydantic model to guard against schema drift
             return GuardrailResult(**data)
         except Exception:
-            # Fail-open on any error
             logger.error("Remote guardrail evaluate failed.", exc_info=True)
             return SAFE_PROMPT_RESULT
 

@@ -19,6 +19,7 @@ from app.settings import (
     GenAIOpenAISettings,
     GuardrailSettings,
     KafkaSettings,
+    ModerationSettings,
     PreparserSettings,
     TriageSettings,
     ZammadAISettings,
@@ -144,6 +145,7 @@ def base_settings() -> ZammadAISettings:
         guardrails=GuardrailSettings(
             enabled=False
         ),  # Disable guardrails by default for tests; individual tests can enable with settings_factory overrides
+        moderation=ModerationSettings(enabled=False),
         preparser=PreparserSettings(enabled=False),
         answer=AnswerSettings(
             ai_answer_disclaimer="",
@@ -230,6 +232,16 @@ def cleanup_triage_singleton() -> Generator[None, None, None]:
     triage_module._service = None
     yield
     triage_module._service = None
+
+
+@pytest.fixture(autouse=True)
+def cleanup_moderation_singleton() -> Generator[None, None, None]:
+    """Reset the shared moderation singleton around each test."""
+    import app.moderation.service as moderation_module
+
+    moderation_module._service = None
+    yield
+    moderation_module._service = None
 
 
 @pytest.fixture(autouse=True)

@@ -159,7 +159,37 @@ class GenAIAnthropicSettings(BaseGenAISettings):
     )
 
 
-GenAIProviderSettings = GenAIOpenAISettings | GenAIAnthropicSettings
+class GenAIGeminiSettings(BaseGenAISettings):
+    """Gemini-specific GenAI configuration."""
+
+    sdk: Literal["gemini"] = Field(description="GenAI SDK to use", default="gemini")
+    chat_model: str = Field(
+        default="gemini-2.5-flash",
+        description="Gemini model to use for completions",
+    )
+    embedding_model: str = Field(
+        default="gemini-embedding-001",
+        description="Gemini model to use for embeddings",
+    )
+    include_thoughts: bool = Field(
+        default=False,
+        description="Whether Gemini should include thoughts when supported.",
+    )
+    triage_thinking_budget: int | None = Field(
+        default=None,
+        description="Optional Gemini thinking budget for triage.",
+    )
+    answer_thinking_budget: int | None = Field(
+        default=None,
+        description="Optional Gemini thinking budget for answers.",
+    )
+    judge_thinking_budget: int | None = Field(
+        default=None,
+        description="Optional Gemini thinking budget for judge and moderation.",
+    )
+
+
+GenAIProviderSettings = GenAIOpenAISettings | GenAIAnthropicSettings | GenAIGeminiSettings
 
 try:
     from .settings import ZammadAISettings

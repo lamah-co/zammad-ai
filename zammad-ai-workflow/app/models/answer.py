@@ -19,6 +19,7 @@ class AnswerCandidate(BaseModel):
         min_length=50,
         max_length=200,
     )
+    # TODO: Revisit this minimum for short conversational support replies.
     response: str = Field(
         description="The final answer to the user's question. Min length 200 chars.",
         min_length=200,

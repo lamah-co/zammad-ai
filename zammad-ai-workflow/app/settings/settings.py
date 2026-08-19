@@ -19,6 +19,7 @@ from .genai import GenAIOpenAISettings, GenAIProviderSettings
 from .guardrails import GuardrailSettings
 from .kafka import KafkaSettings
 from .logging import LoggingSettings
+from .moderation import ModerationSettings
 from .preparser import PreparserSettings
 from .prometheus import PrometheusSettings
 from .triage import TriageSettings
@@ -147,6 +148,10 @@ class ZammadAISettings(BaseSettings):
     guardrails: GuardrailSettings = Field(
         description="Settings for guardrail content safety evaluation.",
         default_factory=lambda: GuardrailSettings(),
+    )
+    moderation: ModerationSettings = Field(
+        description="Settings for Gemini moderation routing and response checks.",
+        default_factory=lambda: ModerationSettings(),
     )
     preparser: "PreparserSettings" = Field(
         description="Settings for optional message preparsing before LLM processing.",

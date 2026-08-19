@@ -9,10 +9,13 @@ import pytest
 from pydantic import ValidationError
 
 from app.errors import TriageCategoryWrongError
+from app.models.moderation import ModerationResult
 from app.models.triage import CategorizationResult, DaysSinceRequestResponse, ProcessingIdResponse
 from app.models.zammad import ArticleAttachment, ZammadArticle, ZammadTicket
 from app.settings.triage import (
+    Action,
     ActionRule,
+    ActionTypes,
     Category,
     Condition,
     LangfusePrompt,
@@ -597,6 +600,175 @@ def test_langfuse_prompt_map_values_are_typed() -> None:
     assert isinstance(prompts.prompt_map["categories"], LangfusePrompt)
     assert isinstance(prompts.prompt_map["examples"], LangfusePrompt)
     assert isinstance(prompts.prompt_map["role"], LangfusePrompt)
+
+
+def _configure_gemini_moderation_triage(
+    triage: TriageService,
+    moderation_result: ModerationResult,
+) -> None:
+    """Enable Gemini moderation routing and add the categories/actions needed by the tests."""
+    triage.settings.moderation.enabled = True
+    conversational_category = Category(name="Conversational support", auto_publish=True)
+    triage.categories.append(conversational_category)
+    triage.categories_by_name[conversational_category.name] = conversational_category
+
+    conversational_action = Action(
+        name="conversational_ai_answer",
+        description="Generate conversational answer",
+        type=ActionTypes.AIAnswer,
+    )
+    out_of_scope_action = Action(
+        name="out_of_scope_static_response",
+        description="Static out-of-scope fallback",
+        type=ActionTypes.StaticAnswer,
+        answer="Thanks for reaching out. Please send a few details about the service, project, or support issue you need help with.",
+    )
+    triage.actions.extend([conversational_action, out_of_scope_action])
+    triage.actions_by_name[conversational_action.name] = conversational_action
+    triage.actions_by_name[out_of_scope_action.name] = out_of_scope_action
+    triage.action_rules.append(
+        ActionRule(category_name="Conversational support", action_name="conversational_ai_answer")
+    )
+
+    class _FakeModerationService:
+        async def moderate_prompt(self, _message: str) -> ModerationResult:
+            return moderation_result
+
+    triage.moderation_service = _FakeModerationService()  # type: ignore[assignment]
+
+
+@pytest.mark.asyncio
+async def test_perform_triage_gemini_moderation_routes_arabic_small_talk_before_llm(
+    patched_triage: TriageService,
+) -> None:
+    """Arabic small talk should become conversational support without calling LLM categorization."""
+    _configure_gemini_moderation_triage(
+        patched_triage,
+        ModerationResult(
+            decision="small_talk",
+            language="ar",
+            risk_level="low",
+            harm_categories=[],
+            reason="Arabic greeting.",
+            customer_response_type="conversational_ai",
+        ),
+    )
+
+    async def _unexpected_categorize(*_args, **_kwargs):
+        raise AssertionError("categorize_ticket should not be called for small talk")
+
+    patched_triage.genai_handler.categorize_ticket = _unexpected_categorize  # type: ignore
+
+    result = await patched_triage.perform_triage(
+        ticket=ZammadTicket(id=42, articles=[ZammadArticle(id=1, ticket_id=42, text="السلام عليكم")])
+    )
+
+    assert result.category.name == "Conversational support"
+    assert result.category.auto_publish is True
+    assert result.action.name == "conversational_ai_answer"
+
+
+@pytest.mark.asyncio
+async def test_perform_triage_gemini_moderation_routes_out_of_scope_to_static_fallback(
+    patched_triage: TriageService,
+) -> None:
+    """Out-of-scope messages should bypass LLM triage and use the static fallback action."""
+    _configure_gemini_moderation_triage(
+        patched_triage,
+        ModerationResult(
+            decision="out_of_scope",
+            language="en",
+            risk_level="low",
+            harm_categories=[],
+            reason="Safe but unrelated request.",
+            customer_response_type="static_fallback",
+        ),
+    )
+
+    async def _unexpected_categorize(*_args, **_kwargs):
+        raise AssertionError("categorize_ticket should not be called for out-of-scope messages")
+
+    patched_triage.genai_handler.categorize_ticket = _unexpected_categorize  # type: ignore
+
+    result = await patched_triage.perform_triage(
+        ticket=ZammadTicket(id=42, articles=[ZammadArticle(id=1, ticket_id=42, text="write me a poem")])
+    )
+
+    assert result.category.name == "Out of scope"
+    assert result.category.auto_publish is True
+    assert result.action.name == "out_of_scope_static_response"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "moderation_result",
+    [
+        ModerationResult(
+            decision="uncertain",
+            language="und",
+            risk_level="medium",
+            harm_categories=[],
+            reason="Ambiguous intent.",
+            customer_response_type="human_review",
+        ),
+        ModerationResult(
+            decision="unsafe",
+            language="ar",
+            risk_level="high",
+            harm_categories=["prompt_injection"],
+            reason="Attempts to bypass policy.",
+            customer_response_type="human_review",
+        ),
+    ],
+)
+async def test_perform_triage_gemini_moderation_sends_risky_messages_to_human_review(
+    patched_triage: TriageService,
+    moderation_result: ModerationResult,
+) -> None:
+    """Uncertain and unsafe moderation decisions should not be auto-published."""
+    _configure_gemini_moderation_triage(patched_triage, moderation_result)
+
+    async def _unexpected_categorize(*_args, **_kwargs):
+        raise AssertionError("categorize_ticket should not be called for uncertain messages")
+
+    patched_triage.genai_handler.categorize_ticket = _unexpected_categorize  # type: ignore
+
+    result = await patched_triage.perform_triage(
+        ticket=ZammadTicket(id=42, articles=[ZammadArticle(id=1, ticket_id=42, text="blue triangle tomorrow")])
+    )
+
+    assert result.category == patched_triage.no_category
+    assert result.action == patched_triage.no_action
+
+
+@pytest.mark.asyncio
+async def test_perform_triage_gemini_moderation_allows_support_messages_to_llm(
+    patched_triage: TriageService,
+) -> None:
+    """Safe support messages should continue through normal LLM categorization."""
+    _configure_gemini_moderation_triage(
+        patched_triage,
+        ModerationResult(
+            decision="safe_support",
+            language="ar",
+            risk_level="low",
+            harm_categories=[],
+            reason="Support request.",
+            customer_response_type="continue_triage",
+        ),
+    )
+    patched_triage.genai_handler.categorization_result = CategorizationResult(  # type: ignore
+        category=Category(name="General"),
+        reasoning="support scope",
+        confidence=0.9,
+    )
+
+    result = await patched_triage.perform_triage(
+        ticket=ZammadTicket(id=42, articles=[ZammadArticle(id=1, ticket_id=42, text="I need help with my project")])
+    )
+
+    assert result.category.name == "General"
+    assert result.reasoning == "support scope"
 
 
 # ---------------------------------------------------------------------------
