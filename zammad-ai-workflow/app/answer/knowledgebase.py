@@ -58,6 +58,28 @@ class QdrantKBError(QdrantPermanentError):
     ...
 
 
+def build_embeddings(genai_settings: GenAIProviderSettings, qdrant_settings: QdrantSettings) -> Embeddings:
+    """Build the embedding client for the configured provider."""
+    match genai_settings.sdk:
+        case "openai" | "anthropic":
+            from langchain_openai import OpenAIEmbeddings
+
+            return OpenAIEmbeddings(
+                model=genai_settings.embedding_model,
+                dimensions=qdrant_settings.vector_dimension,
+                max_retries=genai_settings.max_retries,
+            )
+        case "gemini":
+            from langchain_google_genai import GoogleGenerativeAIEmbeddings
+
+            return GoogleGenerativeAIEmbeddings(
+                model=genai_settings.embedding_model,
+                output_dimensionality=qdrant_settings.vector_dimension,
+            )
+        case _:
+            raise QdrantKBError(f"Unsupported GenAI SDK '{genai_settings.sdk}' for embeddings")
+
+
 class QdrantKBClient:
     """Wrapper around Qdrant client to handle vector storage and retrieval."""
 
@@ -113,20 +135,11 @@ class QdrantKBClient:
             raise QdrantKBError("Failed to check Qdrant collection existence or retrieve collection info") from e
 
         # Create LangChain embedding model
-        self.embeddings: Embeddings
-
-        match genai_settings.sdk:
-            case "openai" | "anthropic":
-                from langchain_openai import OpenAIEmbeddings
-
-                self.embeddings = OpenAIEmbeddings(
-                    model=genai_settings.embedding_model,
-                    dimensions=qdrant_settings.vector_dimension,
-                    max_retries=genai_settings.max_retries,
-                )
-            case _:
-                self.logger.error(f"Unsupported GenAI SDK '{genai_settings.sdk}' for embeddings")
-                raise QdrantKBError(f"Unsupported GenAI SDK '{genai_settings.sdk}' for embeddings")
+        try:
+            self.embeddings = build_embeddings(genai_settings, qdrant_settings)
+        except QdrantKBError:
+            self.logger.error(f"Unsupported GenAI SDK '{genai_settings.sdk}' for embeddings")
+            raise
 
         # Test embedding to ensure configuration is correct
         test_result: list[float] = self.embeddings.embed_query("This is a test string")

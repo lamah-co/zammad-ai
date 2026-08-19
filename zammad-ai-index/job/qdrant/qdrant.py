@@ -32,6 +32,30 @@ class QdrantKBError(Exception):
     ...
 
 
+class GeminiEmbeddings(Embeddings):
+    """LangChain embeddings adapter for the Google GenAI SDK."""
+
+    def __init__(self, model: str, output_dimensionality: int) -> None:
+        from google import genai
+        from google.genai import types
+
+        self.model = model
+        self.client = genai.Client()
+        self.config = types.EmbedContentConfig(output_dimensionality=output_dimensionality)
+
+    def embed_documents(self, texts: list[str]) -> list[list[float]]:
+        result = self.client.models.embed_content(
+            model=self.model,
+            contents=texts,
+            config=self.config,
+        )
+        return [list(embedding.values or []) for embedding in (result.embeddings or [])]
+
+    def embed_query(self, text: str) -> list[float]:
+        embeddings = self.embed_documents([text])
+        return embeddings[0] if embeddings else []
+
+
 class QdrantKBClient:
     """Wrapper around Qdrant client to handle vector storage and retrieval."""
 
@@ -78,6 +102,11 @@ class QdrantKBClient:
                     model=self.genai_settings.embedding_model,
                     dimensions=self.qdrant_settings.vector_dimension,
                     max_retries=self.genai_settings.max_retries,
+                )
+            case "gemini":
+                self.embeddings = GeminiEmbeddings(
+                    model=self.genai_settings.embedding_model,
+                    output_dimensionality=self.qdrant_settings.vector_dimension,
                 )
             case _:
                 self.logger.error(f"Unsupported GenAI SDK '{self.genai_settings.sdk}' for embeddings")

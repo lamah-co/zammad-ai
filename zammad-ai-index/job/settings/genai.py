@@ -12,7 +12,7 @@ class GenAISettings(BaseModel):
     """
 
     # General configuration
-    sdk: Literal["openai"] = Field(
+    sdk: Literal["openai", "gemini"] = Field(
         description="GenAI SDK to use",
         default="openai",
     )
