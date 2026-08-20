@@ -109,7 +109,7 @@ class ZammadAPIClient(BaseZammadClient):
         try:
             response = self._request(
                 "GET",
-                f"/api/v1/knowledge_bases/{self.kb_id}/answers/{answer_id}?include_contents={answer_id}",
+                f"/api/v1/knowledge_bases/{self.kb_id}/answers/{answer_id}",
             )
         except ZammadConnectionError as e:
             cause: BaseException | None = e.__cause__
@@ -120,10 +120,13 @@ class ZammadAPIClient(BaseZammadClient):
             # don't silently treat them as "answer deleted"
             raise
 
+        translation = self._answer_translation(response, answer_id)
+        content = self._answer_translation_content(response, answer_id, translation)
+
         return KnowledgeBaseAnswer(
             id=response["id"],
-            answerTitle=response["assets"]["KnowledgeBaseAnswerTranslation"][str(answer_id)]["title"],
-            answerBody=response["assets"]["KnowledgeBaseAnswerTranslationContent"][str(answer_id)]["body"],
+            answerTitle=translation["title"],
+            answerBody=content["body"],
             attachments=[
                 KnowledgeBaseAttachment(
                     id=attachment["id"],
@@ -135,6 +138,42 @@ class ZammadAPIClient(BaseZammadClient):
             createdAt=response["assets"]["KnowledgeBaseAnswer"][str(answer_id)]["created_at"],
             updatedAt=response["assets"]["KnowledgeBaseAnswer"][str(answer_id)]["updated_at"],
         )
+
+    def _answer_translation(self, response: dict[str, Any], answer_id: int) -> dict[str, Any]:
+        translations = response["assets"]["KnowledgeBaseAnswerTranslation"]
+        translation = next(
+            (
+                translation
+                for translation in translations.values()
+                if translation.get("answer_id") == answer_id or str(translation.get("answer_id")) == str(answer_id)
+            ),
+            None,
+        )
+        if translation is None:
+            translation = translations[str(answer_id)]
+        return translation
+
+    def _answer_translation_content(
+        self, response: dict[str, Any], answer_id: int, translation: dict[str, Any]
+    ) -> dict[str, Any]:
+        content_id = translation.get("content_id")
+        content_assets = response["assets"].get("KnowledgeBaseAnswerTranslationContent", {})
+
+        content = content_assets.get(str(content_id)) if content_id is not None else None
+        if content is None:
+            content = content_assets.get(str(answer_id))
+        if content is not None:
+            return content
+
+        if content_id is None:
+            raise KeyError("KnowledgeBaseAnswerTranslation content_id")
+
+        response_with_content = self._request(
+            "GET",
+            f"/api/v1/knowledge_bases/{self.kb_id}/answers/{answer_id}?include_contents={content_id}",
+        )
+        content_assets = response_with_content["assets"]["KnowledgeBaseAnswerTranslationContent"]
+        return content_assets[str(content_id)]
 
     @override
     def fetch_kb_attachment_data(self, attachment: KnowledgeBaseAttachment) -> str | None:
