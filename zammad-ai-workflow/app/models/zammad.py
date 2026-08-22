@@ -1,5 +1,7 @@
 """Models for Zammad knowledge base, tickets, and answer payloads."""
 
+from datetime import datetime
+
 from markdownify import markdownify
 from pydantic import AliasChoices, BaseModel, Field, field_validator
 
@@ -18,6 +20,15 @@ class ZammadTicket(BaseModel):
         description="List of articles associated with the ticket",
         default_factory=list,
     )
+
+    def latest_customer_article(self) -> "ZammadArticle | None":
+        """Return the newest public customer article, or None when unavailable."""
+        customer_articles = [
+            article for article in self.articles if article.sender == "Customer" and article.internal is False
+        ]
+        if not customer_articles:
+            return None
+        return max(customer_articles, key=lambda article: article.created_at or datetime.min)
 
 
 class ArticleAttachment(BaseModel):
@@ -52,6 +63,27 @@ class ZammadArticle(BaseModel):
         description="Whether the article is internal",
         default=False,
     )
+    type: str | None = Field(
+        description="Zammad article type, such as email or whatsapp message",
+        default=None,
+    )
+    sender: str | None = Field(
+        description="Zammad article sender role, such as Customer, Agent, or System",
+        default=None,
+    )
+    from_: str | None = Field(
+        default=None,
+        description="Article sender address/display value",
+        validation_alias=AliasChoices("from", "from_"),
+    )
+    to: str | None = Field(
+        description="Article recipient address/display value",
+        default=None,
+    )
+    created_at: datetime | None = Field(
+        description="Article creation timestamp",
+        default=None,
+    )
     author: str = Field(
         description="Author of the article",
         default="-",
@@ -83,6 +115,17 @@ class ZammadAnswer(BaseModel):
     )
     subject: str | None = Field(default=None, description="Optional subject line for the answer")
     content_type: str = "text/html"
+    type: str = Field(default="note", description="Zammad article type used to deliver the answer")
+    sender: str = Field(default="Agent", description="Zammad article sender role")
+    from_: str | None = Field(
+        default=None,
+        description="Outbound sender address/display value",
+        serialization_alias="from",
+        validation_alias=AliasChoices("from", "from_"),
+    )
+    to: str | None = Field(default=None, description="Outbound recipient address/display value")
+
+    model_config = {"populate_by_name": True}
 
 
 class ZammadTagAdd(BaseModel):

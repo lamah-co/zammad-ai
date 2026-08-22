@@ -15,6 +15,7 @@ class RecordingZammadClient:
     """Record outbound writes made by ActionService."""
 
     def __init__(self) -> None:
+        """Initialize empty write records."""
         self.answers: list[dict[str, object]] = []
         self.shared_drafts: list[dict[str, object]] = []
 
@@ -25,6 +26,7 @@ class RecordingZammadClient:
         subject: str | None = None,
         internal: bool = False,
     ) -> None:
+        """Record a public or internal answer post."""
         self.answers.append(
             {
                 "ticket_id": ticket_id,
@@ -35,16 +37,25 @@ class RecordingZammadClient:
         )
 
     async def post_shared_draft(self, ticket_id: int, text: str) -> None:
+        """Record a shared draft post."""
         self.shared_drafts.append({"ticket_id": ticket_id, "text": text})
 
     async def close(self) -> None:
+        """No-op close for the fake client."""
         return None
 
 
 class FakeAnswerService:
     """Return a configured AI answer candidate."""
 
+    def __init__(self) -> None:
+        """Initialize call counters."""
+        self.generated_answer_calls = 0
+        self.generated_conversational_calls = 0
+
     async def generate_answer(self, **_kwargs) -> AnswerCandidate:
+        """Return a regular KB-grounded answer candidate."""
+        self.generated_answer_calls += 1
         return AnswerCandidate(
             response=(
                 "This is a generated support reply with enough content to satisfy the schema minimum length. "
@@ -55,11 +66,26 @@ class FakeAnswerService:
             auto_publish=True,
         )
 
+    async def generate_conversational_answer(self, **_kwargs) -> AnswerCandidate:
+        """Return a conversational answer candidate."""
+        self.generated_conversational_calls += 1
+        return AnswerCandidate(
+            response=(
+                "مرحبا، شكرا لتواصلك معنا. يسعدنا مساعدتك في نطاق الدعم المتاح. "
+                "فضلا أرسل تفاصيل الخدمة أو المشروع أو المشكلة التي تحتاج إلى مساعدة بشأنها، "
+                "وسنوجهك للخطوة المناسبة أو للفريق المختص حسب حالتك. "
+                "يمكنك كتابة سؤالك بشكل مختصر أو إرسال تفاصيل إضافية، وسنتعامل مع رسالتك ضمن نطاق الدعم المتاح."
+            ),
+            documents=[],
+            auto_publish=True,
+        )
+
 
 class FakeModerationService:
     """Return a configured moderation decision for generated responses."""
 
     async def moderate_response(self, **_kwargs) -> ModerationResult:
+        """Return a high-risk moderation decision."""
         return ModerationResult(
             decision="unsafe",
             language="ar",
@@ -150,3 +176,41 @@ async def test_gemini_moderation_blocks_auto_publish_for_ai_answer(settings_fact
     assert service.zammad_client.answers == []
     assert len(service.zammad_client.shared_drafts) == 1
     assert service.zammad_client.shared_drafts[0]["ticket_id"] == 123
+
+
+@pytest.mark.asyncio
+async def test_conversational_support_uses_conversational_generator(settings_factory) -> None:
+    """Small-talk actions should not use the KB-grounded answer path."""
+    ai_action = Action(
+        name="conversational_ai_answer",
+        description="Generate conversational answer",
+        type=ActionTypes.AIAnswer,
+    )
+    settings: ZammadAISettings = settings_factory()
+    settings.moderation.small_talk_category_name = "Conversational support"
+    settings.triage.actions.append(ai_action)
+
+    answer_service = FakeAnswerService()
+    service = ActionService.__new__(ActionService)
+    service.settings = settings
+    service.answer_service = answer_service
+    service.guardrail_service = GuardrailService(settings=settings.guardrails)
+    service.moderation_service = FakeModerationService()
+    service.max_user_text_length = settings.max_user_text_length
+    service.zammad_client = RecordingZammadClient()
+
+    triage = TriageResult(
+        user_text="السلام عليكم",
+        category=Category(name="Conversational support", auto_publish=True),
+        action=ai_action,
+        reasoning="Arabic greeting.",
+        confidence=1.0,
+        extracted_values=None,
+    )
+
+    await service.execute_action(ticket_id=123, triage=triage)
+
+    assert answer_service.generated_answer_calls == 0
+    assert answer_service.generated_conversational_calls == 1
+    assert len(service.zammad_client.answers) == 1
+    assert service.zammad_client.answers[0]["internal"] is False

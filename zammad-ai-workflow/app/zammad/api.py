@@ -59,7 +59,15 @@ class ZammadAPIClient(BaseZammadClient):
     @override
     async def post_answer(self, ticket_id: int, text: str, subject: str | None = None, internal: bool = False) -> None:
         payload = ZammadAnswer(ticket_id=ticket_id, body=text, internal=internal, subject=subject)
-        await self._request("POST", "/api/v1/ticket_articles", json=payload.model_dump())
+        if not internal:
+            reply_article = (await self.get_ticket(ticket_id)).latest_customer_article()
+            if reply_article is not None:
+                payload.type = reply_article.type or payload.type
+                payload.from_ = reply_article.to
+                payload.to = reply_article.from_
+        await self._request(
+            "POST", "/api/v1/ticket_articles", json=payload.model_dump(by_alias=True, exclude_none=True)
+        )
         logger.info(f"Posted answer to ticket {ticket_id}")
 
     @override

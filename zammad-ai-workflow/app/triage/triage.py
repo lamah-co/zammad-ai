@@ -16,15 +16,15 @@ from app.errors import (
     TriageError as AppTriageError,
 )
 from app.guardrails import GuardrailService, get_guardrail_service
+from app.models.moderation import ModerationResult
 from app.models.triage import (
     CategorizationResult,
     DaysSinceRequestResponse,
     ProcessingIdResponse,
     TriageResult,
 )
-from app.models.moderation import ModerationResult
-from app.moderation import GeminiModerationService, get_moderation_service
 from app.models.zammad import ArticleAttachment, ZammadTicket
+from app.moderation import GeminiModerationService, get_moderation_service
 from app.preparser.service import PreparserService, get_preparser_service
 from app.settings import ZammadAISettings
 from app.settings.triage import (
@@ -202,7 +202,8 @@ class TriageService:
                 )
 
             # Step 2: Extract customer message, attachments and generate session ID for Langfuse
-            customer_message: str = ticket.articles[0].text
+            customer_article = ticket.latest_customer_article() or ticket.articles[0]
+            customer_message: str = customer_article.text
 
             # Run preparser first (may be a no-op when disabled)
             # Important: Preparse BEFORE any truncation to keep behavior consistent
@@ -219,7 +220,7 @@ class TriageService:
                 )
                 customer_message = customer_message[: self.max_user_text_length]
 
-            attachments: list[ArticleAttachment] = ticket.articles[0].attachments or []
+            attachments: list[ArticleAttachment] = customer_article.attachments or []
             if self.settings.zammad.document_parsing.mode == "off":
                 logger.debug("Document parsing is turned off, skipping attachment content.")
                 customer_message += f"\n\n{len(attachments)} attachments were included."
@@ -228,7 +229,7 @@ class TriageService:
                     try:
                         data: str | None = await self.zammad_client.fetch_ticket_attachment_data(
                             ticket_id=ticket.id,
-                            article_id=ticket.articles[0].id,
+                            article_id=customer_article.id,
                             attachment=attachment,
                         )
                     except (ZammadRetryableError, ZammadConnectionError) as e:
