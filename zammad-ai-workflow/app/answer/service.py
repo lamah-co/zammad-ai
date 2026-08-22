@@ -143,6 +143,51 @@ class AnswerService:
             qdrant_kb_client=self.qdrant_kb_client,
             dlf_client=self.dlf_client,
         )
+        self.conversational_model = get_chat_model(settings.genai, "answer")
+
+    async def generate_conversational_answer(
+        self,
+        user_text: str,
+        session_id: str | None = None,
+    ) -> AnswerCandidate:
+        """Generate a short support-scoped conversational reply without KB grounding."""
+        if session_id is None and self.langfuse_client is not None:
+            session_id = self.langfuse_client.generate_session_id()
+
+        messages = [
+            SystemMessage(
+                content=(
+                    "You are a concise customer-support assistant. Reply to greetings, thanks, polite closings, "
+                    "and availability checks warmly. Stay generic and support-scoped. Do not answer unrelated "
+                    "facts or make account-specific promises. Ask the customer to share the service, project, "
+                    "or support issue they need help with. Write in the customer's language. Return only the "
+                    "customer-facing reply. Use at least 200 characters."
+                )
+            ),
+            HumanMessage(content=user_text),
+        ]
+        config: RunnableConfig = (
+            self.langfuse_client.build_config(session_id=session_id)
+            if self.langfuse_client is not None
+            else RunnableConfig()
+        )
+        with propagate_attributes(session_id=session_id):
+            result = await self.conversational_model.ainvoke(messages, config=with_recursion_limit(config))
+
+        response_text = str(getattr(result, "content", "")).strip()
+        if len(response_text) < 200:
+            if _contains_arabic(user_text):
+                suffix = (
+                    "فضلا أرسل تفاصيل الخدمة أو المشروع أو المشكلة التي تحتاج إلى مساعدة بشأنها، "
+                    "وسنراجع رسالتك ونوجهك إلى الخطوة المناسبة أو إلى الفريق المختص حسب طبيعة طلبك."
+                )
+            else:
+                suffix = (
+                    "Please send a few details about the service, project, or support issue you need help with, "
+                    "and our team will guide you to the right next step."
+                )
+            response_text = f"{response_text}\n\n{suffix}".strip()
+        return AnswerCandidate(response=response_text, documents=[], auto_publish=True)
 
     @observe(as_type="span")
     async def generate_answer(
@@ -195,7 +240,6 @@ class AnswerService:
                         context=self.agent_context,
                     )
 
-                
             agent_structured_response: AnswerCandidate | NoAnswerPossible = extract_structured_response(
                 agent_result,
                 (AnswerCandidate, NoAnswerPossible),
@@ -425,6 +469,10 @@ class AnswerService:
 
 
 _service: AnswerService | None = None
+
+
+def _contains_arabic(text: str) -> bool:
+    return any("\u0600" <= char <= "\u06ff" for char in text)
 
 
 def get_answer_service(settings: ZammadAISettings | None = None) -> AnswerService:

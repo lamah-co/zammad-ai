@@ -1,5 +1,7 @@
 """Models for Zammad knowledge base, tickets, and answer payloads."""
 
+from datetime import datetime
+
 from markdownify import markdownify
 from pydantic import AliasChoices, BaseModel, Field, field_validator
 
@@ -20,15 +22,15 @@ class ZammadTicket(BaseModel):
     )
 
     def latest_customer_article(self) -> "ZammadArticle | None":
-        """Return the newest public customer article, with legacy fallback."""
+        """Return the newest public customer article, or None when unavailable."""
         customer_articles = [
             article
             for article in self.articles
             if not article.internal and (article.sender or "").casefold() == "customer"
         ]
-        if customer_articles:
-            return max(customer_articles, key=lambda article: article.id)
-        return self.articles[0] if self.articles else None
+        if not customer_articles:
+            return None
+        return max(customer_articles, key=lambda article: (article.created_at or datetime.min, article.id))
 
 
 class ArticleAttachment(BaseModel):
@@ -62,6 +64,10 @@ class ZammadArticle(BaseModel):
     internal: bool = Field(
         description="Whether the article is internal",
         default=False,
+    )
+    created_at: datetime | None = Field(
+        description="Article creation timestamp",
+        default=None,
     )
     author: str = Field(
         description="Author of the article",
@@ -130,6 +136,8 @@ class ZammadAnswer(BaseModel):
     )
     to: str | None = Field(description="Outbound recipient address", default=None)
     in_reply_to: str | None = Field(description="Message ID to reply to", default=None)
+
+    model_config = {"populate_by_name": True}
 
 
 class ZammadTagAdd(BaseModel):

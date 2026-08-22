@@ -162,9 +162,15 @@ class ActionService:
                 )
             )
         elif action.type == ActionTypes.AIAnswer:
-            response = await self.answer_service.generate_answer(
-                user_text=user_text, category=category_name, session_id=session_id
-            )
+            if category_name == self.settings.moderation.small_talk_category_name:
+                response = await self.answer_service.generate_conversational_answer(
+                    user_text=user_text,
+                    session_id=session_id,
+                )
+            else:
+                response = await self.answer_service.generate_answer(
+                    user_text=user_text, category=category_name, session_id=session_id
+                )
         elif action.type == ActionTypes.StaticAnswer:
             # The settings validator ensures that if the type is StaticAnswer, the answer field is not None, so we can safely access it here
             if not action.answer:

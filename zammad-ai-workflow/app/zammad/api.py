@@ -81,15 +81,10 @@ class ZammadAPIClient(BaseZammadClient):
 
     async def _build_channel_reply(self, ticket_id: int, text: str, subject: str | None) -> ZammadAnswer:
         ticket = await self.get_ticket(ticket_id)
-        customer_articles = [
-            article
-            for article in ticket.articles
-            if not article.internal and (article.sender or "").casefold() == "customer"
-        ]
-        if not customer_articles:
+        source = ticket.latest_customer_article()
+        if source is None:
             raise UnsupportedReplyChannelError(f"No public customer article found for ticket {ticket_id}")
 
-        source = max(customer_articles, key=lambda article: article.id)
         channel = (source.type or "unknown").casefold()
         if channel == "email":
             if not source.from_:
@@ -170,7 +165,7 @@ class ZammadAPIClient(BaseZammadClient):
                 if isinstance(data, str):
                     try:
                         document_data = b64decode(data, validate=True)
-                    except BinasciiError, ValueError:
+                    except (BinasciiError, ValueError):
                         document_data = data.encode("utf-8")
                 else:
                     document_data = data
