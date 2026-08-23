@@ -7,7 +7,8 @@ import pytest
 
 from app.action.service import ActionService
 from app.errors import UnsupportedReplyChannelError
-from app.models.answer import NoAnswerPossible, StaticAnswer
+from app.models.answer import AnswerCandidate, NoAnswerPossible, StaticAnswer
+from app.models.guardrails import GuardrailResponseResult, GuardrailResult
 from app.models.triage import TriageResult
 from app.settings.triage import Action, ActionTypes, Category
 
@@ -38,6 +39,53 @@ async def test_unsupported_reply_channel_becomes_shared_draft() -> None:
     await service.execute_action(ticket_id=42, triage=triage)
 
     service.zammad_client.post_shared_draft.assert_awaited_once_with(ticket_id=42, text="A reviewed answer")
+
+
+@pytest.mark.asyncio
+async def test_conversational_action_does_not_require_legacy_moderation_settings() -> None:
+    """Conversational routing should work on branches that only expose triage settings."""
+    service = object.__new__(ActionService)
+    service.settings = SimpleNamespace(
+        guardrails=SimpleNamespace(enabled=True),
+        max_user_text_length=2000,
+        triage=SimpleNamespace(
+            actions=[
+                Action(
+                    name="conversational_ai_answer",
+                    description="Generate a brief conversational reply",
+                    type=ActionTypes.AIAnswer,
+                )
+            ]
+        ),
+    )
+    service.guardrail_service = SimpleNamespace(
+        settings=SimpleNamespace(block_on_high_risk=True),
+        evaluate=AsyncMock(return_value=GuardrailResult(prompt_safety="safe")),
+        evaluate_response=AsyncMock(return_value=GuardrailResponseResult(response_safety="safe")),
+    )
+    response_text = (
+        "أهلاً وسهلاً، وصلت رسالتك. يسعدنا مساعدتك في أي سؤال متعلق بالخدمة أو المشروع أو إعدادات الحساب. "
+        "أرسل لنا التفاصيل التي تحتاجها وسنوجهك للخطوة المناسبة بأقرب وقت ممكن. "
+        "نحن هنا لدعمك بطريقة واضحة ومباشرة ومناسبة لسياق الخدمة."
+    )
+    service.answer_service = SimpleNamespace(
+        generate_conversational_answer=AsyncMock(
+            return_value=AnswerCandidate(response=response_text, documents=[], auto_publish=True)
+        ),
+        generate_answer=AsyncMock(),
+    )
+
+    response = await service.get_answer(
+        ticket_id=44,
+        category_name="Conversational support",
+        action_name="conversational_ai_answer",
+        user_text="السلام عليكم",
+        session_id=None,
+    )
+
+    assert response.response == response_text
+    service.answer_service.generate_conversational_answer.assert_awaited_once()
+    service.answer_service.generate_answer.assert_not_called()
 
 
 @pytest.mark.asyncio

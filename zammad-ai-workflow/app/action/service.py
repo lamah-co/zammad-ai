@@ -21,6 +21,8 @@ class ActionService:
     """Execute ticket actions based on triage category and action type."""
 
     logger: Logger = getLogger("zammad-ai.action.service")
+    conversational_action_name = "conversational_ai_answer"
+    conversational_category_name = "Conversational support"
 
     def __init__(self, settings: ZammadAISettings, answer_service: AnswerService):
         """Initialize action execution with settings, answer service, guardrail service, and Zammad client."""
@@ -157,7 +159,7 @@ class ActionService:
                 )
             )
         elif action.type == ActionTypes.AIAnswer:
-            if category_name == self.settings.moderation.small_talk_category_name:
+            if self._is_conversational_action(action=action, category_name=category_name):
                 response = await self.answer_service.generate_conversational_answer(
                     user_text=user_text,
                     session_id=session_id,
@@ -195,6 +197,10 @@ class ActionService:
                 )
 
         return response
+
+    def _is_conversational_action(self, *, action: Action, category_name: str) -> bool:
+        """Identify the configured conversational route without requiring legacy moderation settings."""
+        return action.name == self.conversational_action_name or category_name == self.conversational_category_name
 
     async def cleanup(self) -> None:
         """Close internal clients and reset the module-level service reference.
