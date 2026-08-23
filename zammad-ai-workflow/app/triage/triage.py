@@ -22,6 +22,8 @@ from app.models.triage import (
     ProcessingIdResponse,
     TriageResult,
 )
+from app.models.moderation import ModerationResult
+from app.moderation import GeminiModerationService, get_moderation_service
 from app.models.zammad import ArticleAttachment, ZammadTicket
 from app.preparser.service import PreparserService, get_preparser_service
 from app.settings import ZammadAISettings
@@ -79,6 +81,7 @@ class TriageService:
         """
         self.settings: ZammadAISettings = settings
         self.guardrail_service: GuardrailService = get_guardrail_service(settings=settings.guardrails)
+        self.moderation_service: GeminiModerationService = get_moderation_service(settings=settings)
         self.preparser_service: PreparserService = get_preparser_service(settings=settings.preparser)
         # Triage setup
         self.categories: list[Category] = settings.triage.categories
@@ -257,6 +260,12 @@ class TriageService:
                         break
 
                     customer_message += attachment_message
+
+            moderation_result = await self.moderation_service.moderate_prompt(customer_message)
+            moderated_triage = self._triage_from_moderation(customer_message, moderation_result)
+            if moderated_triage is not None:
+                outcome = "success"
+                return moderated_triage
 
             session_id: str = self.genai_handler.langfuse_client.generate_session_id()
 
@@ -453,6 +462,55 @@ class TriageService:
             The matching Action or no_action as fallback
         """
         return self.actions_by_name.get(action_name, self.no_action)
+
+    def _triage_from_moderation(
+        self, customer_message: str, moderation_result: ModerationResult
+    ) -> TriageResult | None:
+        """Convert authoritative Gemini moderation decisions into triage results."""
+        if not self.settings.moderation.enabled or moderation_result.decision == "safe_support":
+            return None
+
+        if moderation_result.decision == "small_talk":
+            category = self._name_to_category(self.settings.moderation.small_talk_category_name)
+            action = self._name_to_action(
+                next(
+                    (
+                        rule.action_name
+                        for rule in self.action_rules
+                        if rule.category_name == category.name and rule.conditions is None
+                    ),
+                    self.no_action.name,
+                )
+            )
+            return TriageResult(
+                user_text=customer_message,
+                category=category,
+                action=action,
+                reasoning=moderation_result.reason,
+                confidence=1.0 if moderation_result.risk_level == "low" else 0.7,
+                extracted_values=None,
+            )
+
+        if moderation_result.decision == "out_of_scope":
+            category = Category(name=self.settings.moderation.out_of_scope_category_name, auto_publish=True)
+            action = self._name_to_action(self.settings.moderation.out_of_scope_action_name)
+            return TriageResult(
+                user_text=customer_message,
+                category=category,
+                action=action,
+                reasoning=moderation_result.reason,
+                confidence=1.0 if moderation_result.risk_level == "low" else 0.7,
+                extracted_values=None,
+            )
+
+        return TriageResult(
+            user_text=customer_message,
+            category=self.no_category,
+            action=self.no_action,
+            reasoning=moderation_result.reason,
+            confidence=0.0 if moderation_result.decision == "unsafe" else 0.4,
+            extracted_values=None,
+        )
 
     async def cleanup(self) -> None:
         """Release resources held by the TriageService and clear the global singleton.

@@ -7,7 +7,9 @@ from app.errors import ActionExecutionError, AppError, UnsupportedReplyChannelEr
 from app.guardrails import GuardrailService, get_guardrail_service
 from app.models.answer import AnswerCandidate, NoAnswerPossible, StaticAnswer
 from app.models.guardrails import GuardrailResponseResult, GuardrailResult
+from app.models.moderation import ModerationResult
 from app.models.triage import Action
+from app.moderation import GeminiModerationService, get_moderation_service
 from app.settings.settings import ZammadAISettings
 from app.settings.triage import ActionTypes
 from app.settings.zammad import ZammadAPISettings, ZammadEAISettings
@@ -29,6 +31,7 @@ class ActionService:
         self.settings: ZammadAISettings = settings
         self.answer_service: AnswerService = answer_service
         self.guardrail_service: GuardrailService = get_guardrail_service(settings=settings.guardrails)
+        self.moderation_service: GeminiModerationService = get_moderation_service(settings=settings)
         self.max_user_text_length: int = settings.max_user_text_length
         # Zammad client setup
         if isinstance(self.settings.zammad, ZammadAPISettings):
@@ -180,6 +183,22 @@ class ActionService:
 
         # Evaluate guardrails on the generated response as well
         if isinstance(response, AnswerCandidate):
+            moderation_result: ModerationResult = await self.moderation_service.moderate_response(
+                prompt=user_text,
+                response=response.response,
+                session_id=session_id,
+            )
+            if self.settings.moderation.enabled:
+                self.logger.info(
+                    f"Gemini moderation for generated response on ticket {ticket_id if ticket_id is not None else 'unknown'}: decision={moderation_result.decision}, route={moderation_result.customer_response_type}, risk={moderation_result.risk_level}"
+                )
+            if (
+                self.settings.moderation.enabled
+                and self.settings.moderation.block_on_unsafe
+                and moderation_result.customer_response_type == "human_review"
+            ):
+                response.auto_publish = False
+
             response_guardrail_result: GuardrailResponseResult = await self.guardrail_service.evaluate_response(
                 text=user_text, response=response.response
             )
