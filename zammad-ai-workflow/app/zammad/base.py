@@ -66,6 +66,16 @@ class BaseZammadClient(ABC):
         ...
 
     @abstractmethod
+    async def set_ticket_state(self, ticket_id: int, state: str) -> None:
+        """Update the ticket state.
+
+        Args:
+            ticket_id: ID of the ticket to update.
+            state: Zammad state name to apply.
+        """
+        ...
+
+    @abstractmethod
     async def post_answer(
         self,
         ticket_id: int,
@@ -187,7 +197,7 @@ class BaseZammadClient(ABC):
         except ZammadRetryableError:
             logger.error(f"Zammad request failed for {method} {url}.", exc_info=True)
             raise
-        except TicketNotFoundError, ZammadAuthError, ZammadPayloadParseError, ZammadPermanentError:
+        except (TicketNotFoundError, ZammadAuthError, ZammadPayloadParseError, ZammadPermanentError):
             logger.error(f"Zammad request failed for {method} {url}.", exc_info=True)
             raise
 

@@ -84,6 +84,12 @@ class ZammadAPIClient(BaseZammadClient):
         logger.info(f"Updated ticket {ticket_id} to pending close after {days} days")
 
     @override
+    async def set_ticket_state(self, ticket_id: int, state: str) -> None:
+        payload = {"id": ticket_id, "state": state}
+        await self._request("PUT", f"/api/v1/tickets/{ticket_id}", json=payload)
+        logger.info(f"Updated ticket {ticket_id} state to {state}")
+
+    @override
     async def post_shared_draft(self, ticket_id: int, text: str) -> None:
         payload = ZammadAPISharedDraft(new_article=ZammadSharedDraftArticle(body=text, ticket_id=ticket_id))
         await self._request("PUT", f"/api/v1/tickets/{ticket_id}/shared_draft", json=payload.model_dump(by_alias=True))
@@ -121,7 +127,7 @@ class ZammadAPIClient(BaseZammadClient):
                 if isinstance(data, str):
                     try:
                         document_data = b64decode(data, validate=True)
-                    except BinasciiError, ValueError:
+                    except (BinasciiError, ValueError):
                         document_data = data.encode("utf-8")
                 else:
                     document_data = data

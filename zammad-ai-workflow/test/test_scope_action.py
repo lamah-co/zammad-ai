@@ -4,7 +4,7 @@ import pytest
 
 from app.action.service import ActionService
 from app.guardrails import GuardrailService
-from app.models.answer import AnswerCandidate
+from app.models.answer import AnswerCandidate, NoAnswerPossible
 from app.models.moderation import ModerationResult
 from app.models.triage import TriageResult
 from app.settings import ZammadAISettings
@@ -18,6 +18,8 @@ class RecordingZammadClient:
         """Initialize empty write records."""
         self.answers: list[dict[str, object]] = []
         self.shared_drafts: list[dict[str, object]] = []
+        self.tags: list[dict[str, object]] = []
+        self.states: list[dict[str, object]] = []
 
     async def post_answer(
         self,
@@ -39,6 +41,14 @@ class RecordingZammadClient:
     async def post_shared_draft(self, ticket_id: int, text: str) -> None:
         """Record a shared draft post."""
         self.shared_drafts.append({"ticket_id": ticket_id, "text": text})
+
+    async def add_tag_to_ticket(self, ticket_id: int, tag: str) -> None:
+        """Record a tag assignment."""
+        self.tags.append({"ticket_id": ticket_id, "tag": tag})
+
+    async def set_ticket_state(self, ticket_id: int, state: str) -> None:
+        """Record a ticket state update."""
+        self.states.append({"ticket_id": ticket_id, "state": state})
 
     async def close(self) -> None:
         """No-op close for the fake client."""
@@ -78,6 +88,20 @@ class FakeAnswerService:
             ),
             documents=[],
             auto_publish=True,
+        )
+
+
+class NoAnswerService(FakeAnswerService):
+    """Return a no-answer outcome from the KB-grounded answer path."""
+
+    async def generate_answer(self, **_kwargs) -> NoAnswerPossible:
+        """Return a no-answer outcome with schema-compliant reasoning."""
+        self.generated_answer_calls += 1
+        return NoAnswerPossible(
+            reasoning=(
+                "The retrieved knowledge-base passages did not contain enough grounded information to answer the "
+                "customer question confidently, so the workflow must avoid inventing unsupported operational details."
+            )
         )
 
 
@@ -214,3 +238,123 @@ async def test_conversational_support_uses_conversational_generator(settings_fac
     assert answer_service.generated_conversational_calls == 1
     assert len(service.zammad_client.answers) == 1
     assert service.zammad_client.answers[0]["internal"] is False
+
+
+@pytest.mark.asyncio
+async def test_no_answer_possible_sends_customer_fallback_and_agent_handoff(settings_factory) -> None:
+    """FAQ requests that cannot be grounded should acknowledge the customer and alert agents."""
+    ai_action = Action(
+        name="ai_answer",
+        description="Generate grounded answer",
+        type=ActionTypes.AIAnswer,
+    )
+    settings: ZammadAISettings = settings_factory()
+    settings.triage.actions.append(ai_action)
+    settings.triage.no_answer_public_fallback = "تم استلام سؤالك، سنقوم بالرد عليك في أقرب وقت ممكن."
+    settings.triage.no_answer_internal_note = (
+        "AI could not generate a grounded answer.\n"
+        "Category: {category}\n"
+        "Action: {action}\n"
+        "Customer message: {customer_message}\n"
+        "Reason: {reason}"
+    )
+    settings.triage.no_answer_tag = "ai_no_answer"
+    settings.triage.handoff_ticket_state = "open"
+
+    service = ActionService.__new__(ActionService)
+    service.settings = settings
+    service.answer_service = NoAnswerService()
+    service.guardrail_service = GuardrailService(settings=settings.guardrails)
+    service.moderation_service = FakeModerationService()
+    service.max_user_text_length = settings.max_user_text_length
+    service.zammad_client = RecordingZammadClient()
+
+    triage = TriageResult(
+        user_text="شن نوع Authorization المستخدم؟",
+        category=Category(name="FAQ answerable", auto_publish=True),
+        action=ai_action,
+        reasoning="Question appears answerable from the FAQ scope.",
+        confidence=0.92,
+        extracted_values=None,
+    )
+
+    await service.execute_action(ticket_id=123, triage=triage)
+
+    public_answers = [answer for answer in service.zammad_client.answers if not answer["internal"]]
+    internal_answers = [answer for answer in service.zammad_client.answers if answer["internal"]]
+
+    assert public_answers == [
+        {
+            "ticket_id": 123,
+            "text": "تم استلام سؤالك، سنقوم بالرد عليك في أقرب وقت ممكن.",
+            "subject": "Answer",
+            "internal": False,
+        }
+    ]
+    assert len(internal_answers) == 1
+    assert internal_answers[0]["subject"] == "Handoff"
+    assert "شن نوع Authorization المستخدم؟" in str(internal_answers[0]["text"])
+    assert service.zammad_client.tags == [{"ticket_id": 123, "tag": "ai_no_answer"}]
+    assert service.zammad_client.states == [{"ticket_id": 123, "state": "open"}]
+    assert service.zammad_client.shared_drafts == []
+
+
+@pytest.mark.asyncio
+async def test_human_review_required_sends_acknowledgement_and_handoff(settings_factory) -> None:
+    """Human review outcomes should not remain silent."""
+    no_action = Action(
+        name="no_action",
+        description="Escalate to a human",
+        type=ActionTypes.NoAction,
+    )
+    human_review_message = "تم استلام استفسارك ، ويحتاج إلى مراجعة من الفريق المختص . سنقوم بالرد عليك في أقرب وقت ممكن"
+    settings: ZammadAISettings = settings_factory()
+    settings.triage.actions.append(no_action)
+    settings.triage.no_category_name = "Human review required"
+    settings.triage.human_review_public_fallback = human_review_message
+    settings.triage.human_review_internal_note = (
+        "AI routed this ticket to human review.\n"
+        "Category: {category}\n"
+        "Action: {action}\n"
+        "Customer message: {customer_message}\n"
+        "Reason: {reason}"
+    )
+    settings.triage.human_review_tag = "ai_human_review"
+    settings.triage.handoff_ticket_state = "open"
+
+    service = ActionService.__new__(ActionService)
+    service.settings = settings
+    service.answer_service = FakeAnswerService()
+    service.guardrail_service = GuardrailService(settings=settings.guardrails)
+    service.moderation_service = FakeModerationService()
+    service.max_user_text_length = settings.max_user_text_length
+    service.zammad_client = RecordingZammadClient()
+
+    triage = TriageResult(
+        user_text="عندي رقم مرسل كيف يتم تفعيله؟",
+        category=Category(name="Human review required", auto_publish=False),
+        action=no_action,
+        reasoning="Customer asks for account-specific sender activation.",
+        confidence=0.88,
+        extracted_values=None,
+    )
+
+    await service.execute_action(ticket_id=456, triage=triage)
+
+    public_answers = [answer for answer in service.zammad_client.answers if not answer["internal"]]
+    internal_answers = [answer for answer in service.zammad_client.answers if answer["internal"]]
+
+    assert public_answers == [
+        {
+            "ticket_id": 456,
+            "text": human_review_message,
+            "subject": "Answer",
+            "internal": False,
+        }
+    ]
+    assert len(internal_answers) == 1
+    assert internal_answers[0]["subject"] == "Handoff"
+    assert "عندي رقم مرسل كيف يتم تفعيله؟" in str(internal_answers[0]["text"])
+    assert service.zammad_client.tags == [{"ticket_id": 456, "tag": "ai_human_review"}]
+    assert service.zammad_client.states == [{"ticket_id": 456, "state": "open"}]
+    assert service.zammad_client.shared_drafts == []

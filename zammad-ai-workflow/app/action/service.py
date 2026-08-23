@@ -56,22 +56,17 @@ class ActionService:
 
             if isinstance(response, NoAnswerPossible):
                 self.logger.info(f"No answer generated for ticket {ticket_id} with category {category}")
-                if not self.settings.triage.no_action_internal_note:
-                    return
-                text: str = _safe_format(
-                    template=self.settings.triage.no_action_internal_note,
+                await self._execute_handoff(
+                    ticket_id=ticket_id,
                     category=category,
                     action=action,
                     reason=f"{reason}\n\nNo answer possible. Explanation:\n{response.reasoning}",
+                    customer_message=triage.user_text,
+                    human_review=(
+                        category == self.settings.triage.no_category_name
+                        or triage.action.type == ActionTypes.NoAction
+                    ),
                 )
-
-                await self.zammad_client.post_answer(
-                    ticket_id=ticket_id,
-                    text=text,
-                    subject="No answer generation possible",
-                    internal=True,  # Post an internal note if no answer is generated to document the triage result and action execution
-                )
-                self.logger.info(f"Posted internal note for ticket {ticket_id} with category {category}")
             elif triage.category.auto_publish and (
                 isinstance(response, StaticAnswer) or (isinstance(response, AnswerCandidate) and response.auto_publish)
             ):
@@ -225,6 +220,67 @@ class ActionService:
         finally:
             global _service
             _service = None
+
+    async def _execute_handoff(
+        self,
+        *,
+        ticket_id: int,
+        category: str,
+        action: str,
+        reason: str,
+        customer_message: str,
+        human_review: bool,
+    ) -> None:
+        """Notify the customer and surface unresolved tickets for agent follow-up."""
+        public_fallback = (
+            self.settings.triage.human_review_public_fallback
+            if human_review
+            else self.settings.triage.no_answer_public_fallback
+        )
+        internal_note_template = (
+            self.settings.triage.human_review_internal_note
+            if human_review
+            else self.settings.triage.no_answer_internal_note or self.settings.triage.no_action_internal_note
+        )
+        tag = self.settings.triage.human_review_tag if human_review else self.settings.triage.no_answer_tag
+
+        if internal_note_template:
+            text: str = _safe_format(
+                template=internal_note_template,
+                category=category,
+                action=action,
+                reason=reason,
+                customer_message=customer_message,
+            )
+            await self.zammad_client.post_answer(
+                ticket_id=ticket_id,
+                text=text,
+                subject="Handoff",
+                internal=True,
+            )
+            self.logger.info(f"Posted handoff internal note for ticket {ticket_id} with category {category}")
+
+        if tag:
+            await self.zammad_client.add_tag_to_ticket(ticket_id=ticket_id, tag=tag)
+            self.logger.info(f"Tagged handoff ticket {ticket_id} with {tag}")
+
+        if self.settings.triage.handoff_ticket_state:
+            await self.zammad_client.set_ticket_state(
+                ticket_id=ticket_id,
+                state=self.settings.triage.handoff_ticket_state,
+            )
+            self.logger.info(
+                f"Set handoff ticket {ticket_id} state to {self.settings.triage.handoff_ticket_state}"
+            )
+
+        if public_fallback:
+            await self.zammad_client.post_answer(
+                ticket_id=ticket_id,
+                text=public_fallback,
+                subject="Answer",
+                internal=False,
+            )
+            self.logger.info(f"Posted handoff acknowledgement for ticket {ticket_id} with category {category}")
 
 
 class _SafeFormatDict(dict[str, str]):
