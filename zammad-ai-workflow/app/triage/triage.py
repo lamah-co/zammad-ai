@@ -16,7 +16,6 @@ from app.errors import (
     TriageError as AppTriageError,
 )
 from app.guardrails import GuardrailService, get_guardrail_service
-from app.models.moderation import ModerationResult
 from app.models.triage import (
     CategorizationResult,
     DaysSinceRequestResponse,
