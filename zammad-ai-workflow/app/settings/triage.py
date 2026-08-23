@@ -20,6 +20,34 @@ class TriageSettings(BaseModel):
         default=None,
         description="Internal note text to post when triage results in no action. When None, no internal note will be posted. Use the following variables in the note: {category} for the assigned category, {action} for the assigned action, and {reason} for the reason behind the triage decision.",
     )
+    no_answer_public_fallback: str | None = Field(
+        default=None,
+        description="Public fallback sent when an AI answer cannot be generated for an otherwise answerable request.",
+    )
+    no_answer_internal_note: str | None = Field(
+        default=None,
+        description="Internal note posted when an AI answer cannot be generated. Supports {category}, {action}, {reason}, and {customer_message}.",
+    )
+    no_answer_tag: str | None = Field(
+        default=None,
+        description="Tag added when an AI answer cannot be generated.",
+    )
+    human_review_public_fallback: str | None = Field(
+        default=None,
+        description="Public acknowledgement sent when the selected outcome requires human review.",
+    )
+    human_review_internal_note: str | None = Field(
+        default=None,
+        description="Internal note posted when the selected outcome requires human review. Supports {category}, {action}, {reason}, and {customer_message}.",
+    )
+    human_review_tag: str | None = Field(
+        default=None,
+        description="Tag added when the selected outcome requires human review.",
+    )
+    handoff_ticket_state: str | None = Field(
+        default=None,
+        description="Ticket state to apply to handoff outcomes. Leave unset to avoid changing state.",
+    )
     action_rules: list["ActionRule"]
     prompts: StringTriagePrompts | FileTriagePrompts | LangfuseTriagePrompts = Field(
         description="Prompts for the triage process. Can be provided as raw strings, file paths, or Langfuse prompt references. All prompts support Jinja2 templating automatically.",
@@ -135,25 +163,30 @@ class TriageSettings(BaseModel):
         return self
 
     @model_validator(mode="before")
-    def validate_no_action_internal_note_variables(cls, values: dict) -> dict:
-        """Validate that the no_action_internal_note only contains valid variables."""
-        note: str | None = values.get("no_action_internal_note")
-        if note is None:
-            return values
+    def validate_note_template_variables(cls, values: dict) -> dict:
+        """Validate internal-note templates only use supported variables."""
+        note_fields = ("no_action_internal_note", "no_answer_internal_note", "human_review_internal_note")
+        valid_variables = {"category", "action", "reason", "customer_message"}
 
-        try:
-            list(Formatter().parse(note))
-        except ValueError as e:
-            raise ValueError(f"no_action_internal_note has invalid format syntax: {e}")
+        for field_name in note_fields:
+            note: str | None = values.get(field_name)
+            if note is None:
+                continue
 
-        valid_variables = {"{category}", "{action}", "{reason}"}
-        used_variables = {part for part in note.split() if part.startswith("{") and part.endswith("}")}
-        invalid_variables = used_variables - valid_variables
+            try:
+                parsed = list(Formatter().parse(note))
+            except ValueError as e:
+                raise ValueError(f"{field_name} has invalid format syntax: {e}")
 
-        if invalid_variables:
-            raise ValueError(
-                f"no_action_internal_note contains invalid variables: {invalid_variables}. Valid variables are: {valid_variables}"
-            )
+            invalid_variables = {
+                field
+                for _literal_text, field, _format_spec, _conversion in parsed
+                if field is not None and field not in valid_variables
+            }
+            if invalid_variables:
+                raise ValueError(
+                    f"{field_name} contains invalid variables: {invalid_variables}. Valid variables are: {valid_variables}"
+                )
 
         return values
 
