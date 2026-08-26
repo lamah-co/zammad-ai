@@ -5,6 +5,7 @@ from .frontend import FrontendSettings
 from .genai import GenAIAnthropicSettings, GenAIGeminiSettings, GenAIOpenAISettings, GenAIProviderSettings
 from .guardrails import GuardrailSettings
 from .kafka import KafkaSettings
+from .localization import LocalizationSettings
 from .moderation import ModerationSettings
 from .preparser import PreparserSettings
 from .settings import ZammadAISettings, get_settings
@@ -23,6 +24,7 @@ __all__: list[str] = [
     "GenAIGeminiSettings",
     "get_settings",
     "KafkaSettings",
+    "LocalizationSettings",
     "ModerationSettings",
     "JudgeSettings",
     "JudgeThresholds",

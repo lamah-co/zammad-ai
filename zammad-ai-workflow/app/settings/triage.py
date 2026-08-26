@@ -8,6 +8,9 @@ from typing import ClassVar, Literal
 
 from pydantic import BaseModel, Field, FilePath, model_validator
 
+from app.settings.localization import LocalizedText
+from app.utils.localization import is_blank_localized_text
+
 
 class TriageSettings(BaseModel):
     """Settings for triage categories, actions, rules, and prompts."""
@@ -20,9 +23,9 @@ class TriageSettings(BaseModel):
         default=None,
         description="Internal note text to post when triage results in no action. When None, no internal note will be posted. Use the following variables in the note: {category} for the assigned category, {action} for the assigned action, and {reason} for the reason behind the triage decision.",
     )
-    no_answer_public_fallback: str | None = Field(
+    no_answer_public_fallback: LocalizedText | None = Field(
         default=None,
-        description="Public fallback sent when an AI answer cannot be generated for an otherwise answerable request.",
+        description="Public fallback sent when an AI answer cannot be generated. May be a string or a language map.",
     )
     no_answer_internal_note: str | None = Field(
         default=None,
@@ -32,9 +35,9 @@ class TriageSettings(BaseModel):
         default=None,
         description="Tag added when an AI answer cannot be generated.",
     )
-    human_review_public_fallback: str | None = Field(
+    human_review_public_fallback: LocalizedText | None = Field(
         default=None,
-        description="Public acknowledgement sent when the selected outcome requires human review.",
+        description="Public acknowledgement sent when the selected outcome requires human review. May be a string or a language map.",
     )
     human_review_internal_note: str | None = Field(
         default=None,
@@ -151,7 +154,7 @@ class TriageSettings(BaseModel):
 
         # Validate that all StaticAnswer actions have a non-empty answer configured
         for action in self.actions:
-            if action.type == ActionTypes.StaticAnswer and (action.answer is None or not action.answer.strip()):
+            if action.type == ActionTypes.StaticAnswer and is_blank_localized_text(action.answer):
                 errors.append(f"Action '{action.name}' has type StaticAnswer but answer is None or empty")
 
         # Validate that prompts are properly configured based on their type
@@ -212,7 +215,7 @@ class Action(BaseModel):
     name: str
     description: str
     type: ActionTypes
-    answer: str | None = None
+    answer: LocalizedText | None = None
 
 
 class ActionRule(BaseModel):

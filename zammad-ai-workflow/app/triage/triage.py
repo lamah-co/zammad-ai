@@ -16,15 +16,15 @@ from app.errors import (
     TriageError as AppTriageError,
 )
 from app.guardrails import GuardrailService, get_guardrail_service
+from app.models.moderation import ModerationResult
 from app.models.triage import (
     CategorizationResult,
     DaysSinceRequestResponse,
     ProcessingIdResponse,
     TriageResult,
 )
-from app.models.moderation import ModerationResult
-from app.moderation import GeminiModerationService, get_moderation_service
 from app.models.zammad import ArticleAttachment, ZammadTicket
+from app.moderation import GeminiModerationService, get_moderation_service
 from app.preparser.service import PreparserService, get_preparser_service
 from app.settings import ZammadAISettings
 from app.settings.triage import (
@@ -38,6 +38,7 @@ from app.settings.triage import (
     TriagePrompt,
 )
 from app.settings.zammad import ZammadAPISettings, ZammadEAISettings
+from app.utils.localization import normalize_supported_language
 from app.utils.logging import getLogger
 from app.utils.paths import get_prompts_dir
 from app.utils.prompts import load_prompt
@@ -198,6 +199,7 @@ class TriageService:
                     reasoning="No articles found",
                     confidence=1.0,
                     action=self.no_action,
+                    language=self.settings.localization.default_language,
                     extracted_values=None,
                 )
 
@@ -262,7 +264,25 @@ class TriageService:
                     customer_message += attachment_message
 
             moderation_result = await self.moderation_service.moderate_prompt(customer_message)
-            moderated_triage = self._triage_from_moderation(customer_message, moderation_result)
+            language = normalize_supported_language(moderation_result.language, self.settings.localization)
+            if language is None and self.settings.localization.unsupported_language_action == "human_review":
+                outcome = "success"
+                return TriageResult(
+                    user_text=customer_message,
+                    category=self.no_category,
+                    action=self.no_action,
+                    reasoning=(
+                        f"Unsupported customer language '{moderation_result.language}' detected by moderation; "
+                        "routing to human review."
+                    ),
+                    confidence=0.0,
+                    language=self.settings.localization.default_language,
+                    extracted_values=None,
+                )
+            if language is None:
+                language = self.settings.localization.default_language
+
+            moderated_triage = self._triage_from_moderation(customer_message, moderation_result, language=language)
             if moderated_triage is not None:
                 outcome = "success"
                 return moderated_triage
@@ -290,6 +310,7 @@ class TriageService:
                 action=action,
                 reasoning=categorization.reasoning,
                 confidence=categorization.confidence,
+                language=language,
                 extracted_values=categorization.extracted_values,
             )
         finally:
@@ -464,7 +485,7 @@ class TriageService:
         return self.actions_by_name.get(action_name, self.no_action)
 
     def _triage_from_moderation(
-        self, customer_message: str, moderation_result: ModerationResult
+        self, customer_message: str, moderation_result: ModerationResult, *, language: str
     ) -> TriageResult | None:
         """Convert authoritative Gemini moderation decisions into triage results."""
         if not self.settings.moderation.enabled or moderation_result.decision == "safe_support":
@@ -488,6 +509,7 @@ class TriageService:
                 action=action,
                 reasoning=moderation_result.reason,
                 confidence=1.0 if moderation_result.risk_level == "low" else 0.7,
+                language=language,
                 extracted_values=None,
             )
 
@@ -500,6 +522,7 @@ class TriageService:
                 action=action,
                 reasoning=moderation_result.reason,
                 confidence=1.0 if moderation_result.risk_level == "low" else 0.7,
+                language=language,
                 extracted_values=None,
             )
 
@@ -509,6 +532,7 @@ class TriageService:
             action=self.no_action,
             reasoning=moderation_result.reason,
             confidence=0.0 if moderation_result.decision == "unsafe" else 0.4,
+            language=language,
             extracted_values=None,
         )
 

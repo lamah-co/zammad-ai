@@ -3,7 +3,9 @@
 import asyncio
 from collections.abc import Callable, Generator
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, cast
+from unittest.mock import AsyncMock
 
 import pytest
 from pydantic import ValidationError
@@ -72,6 +74,38 @@ def test_triage_settings_rejects_invalid_references_and_missing_standard_answer(
     assert "ActionRule.action_name 'MissingAction'" in message
     assert "Condition.action_name 'MissingConditionAction'" in message
     assert "Action 'Escalate' has type StaticAnswer but answer is None" in message
+
+
+def test_triage_settings_accepts_localized_static_answer() -> None:
+    """Static actions may provide localized answer maps for supported deployments."""
+    settings = TriageSettings.model_validate(
+        {
+            "categories": [{"name": "General"}],
+            "no_category_name": "General",
+            "actions": [
+                {"name": "No Action", "description": "No action", "type": "NoAction"},
+                {
+                    "name": "Static",
+                    "description": "Static fallback",
+                    "type": "StaticAnswer",
+                    "answer": {"ar": "تم استلام رسالتك.", "en": "We received your message."},
+                },
+            ],
+            "no_action_name": "No Action",
+            "action_rules": [],
+            "prompts": {
+                "type": "string",
+                "prompt_map": {
+                    "categories": "List of categories: {{categories}}",
+                    "examples": "Examples: {{examples}}",
+                    "role": "Role prompt",
+                },
+            },
+        }
+    )
+
+    static_action = next(action for action in settings.actions if action.name == "Static")
+    assert static_action.answer == {"ar": "تم استلام رسالتك.", "en": "We received your message."}
 
 
 @pytest.mark.parametrize(
@@ -213,6 +247,71 @@ async def test_perform_triage_returns_defaults_when_no_articles(patched_triage: 
     assert result.action == patched_triage.no_action
     assert result.reasoning == "No articles found"
     assert result.confidence == 1.0
+    assert result.language == "ar"
+
+
+@pytest.mark.asyncio
+async def test_perform_triage_normalizes_moderation_language(patched_triage: TriageService) -> None:
+    """Supported BCP-47 language variants should be carried into action execution."""
+    patched_triage.moderation_service = SimpleNamespace(
+        moderate_prompt=AsyncMock(
+            return_value=ModerationResult(
+                decision="small_talk",
+                language="ar-LY",
+                risk_level="low",
+                harm_categories=[],
+                reason="Arabic greeting.",
+                customer_response_type="conversational_ai",
+            )
+        )
+    )
+    patched_triage.settings.moderation.enabled = True
+    patched_triage.settings.moderation.small_talk_category_name = "General"
+    patched_triage.action_rules = [ActionRule(category_name="General", action_name="AI_Answer")]
+    patched_triage.actions_by_name["AI_Answer"] = Action(
+        name="AI_Answer",
+        description="AI answer",
+        type=ActionTypes.AIAnswer,
+    )
+
+    result = await patched_triage.perform_triage(
+        ticket=ZammadTicket(
+            id=124,
+            articles=[ZammadArticle(id=1, ticket_id=124, sender="Customer", type="email", text="السلام عليكم")],
+        )
+    )
+
+    assert result.category.name == "General"
+    assert result.language == "ar"
+
+
+@pytest.mark.asyncio
+async def test_perform_triage_routes_unsupported_language_to_human_review(patched_triage: TriageService) -> None:
+    """Clearly unsupported languages should not continue into automated answer generation."""
+    patched_triage.moderation_service = SimpleNamespace(
+        moderate_prompt=AsyncMock(
+            return_value=ModerationResult(
+                decision="safe_support",
+                language="fr",
+                risk_level="low",
+                harm_categories=[],
+                reason="French support request.",
+                customer_response_type="continue_triage",
+            )
+        )
+    )
+
+    result = await patched_triage.perform_triage(
+        ticket=ZammadTicket(
+            id=125,
+            articles=[ZammadArticle(id=1, ticket_id=125, sender="Customer", type="email", text="Bonjour, aidez-moi")],
+        )
+    )
+
+    assert result.category == patched_triage.no_category
+    assert result.action == patched_triage.no_action
+    assert result.language == "ar"
+    assert "Unsupported customer language 'fr'" in result.reasoning
 
 
 @pytest.mark.asyncio

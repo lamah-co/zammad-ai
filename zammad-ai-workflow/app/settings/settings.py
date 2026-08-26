@@ -18,6 +18,7 @@ from .frontend import FrontendSettings
 from .genai import GenAIOpenAISettings, GenAIProviderSettings
 from .guardrails import GuardrailSettings
 from .kafka import KafkaSettings
+from .localization import LocalizationSettings
 from .logging import LoggingSettings
 from .moderation import ModerationSettings
 from .preparser import PreparserSettings
@@ -152,6 +153,10 @@ class ZammadAISettings(BaseSettings):
     moderation: ModerationSettings = Field(
         description="Settings for Gemini moderation routing and response checks.",
         default_factory=lambda: ModerationSettings(),
+    )
+    localization: LocalizationSettings = Field(
+        description="Settings for supported customer languages and localized fallback messages.",
+        default_factory=lambda: LocalizationSettings(),
     )
     preparser: "PreparserSettings" = Field(
         description="Settings for optional message preparsing before LLM processing.",

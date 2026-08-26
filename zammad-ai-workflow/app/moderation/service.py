@@ -21,7 +21,9 @@ logger = logging.getLogger("zammad-ai.moderation")
 
 MODERATION_PROMPT = """You are a multilingual customer-support moderation classifier.
 
-Evaluate Arabic, English, Arabizi, dialect Arabic, and mixed-language messages.
+Evaluate Arabic, English, Arabizi, dialect Arabic, and mixed Arabic/English messages.
+Arabic and English are the only supported automated customer languages.
+If the customer text is clearly in another language, return uncertain and route to human_review.
 Return only the structured moderation result.
 
 Decisions:
@@ -46,6 +48,7 @@ class GeminiModerationService:
     """Use Gemini structured output for multilingual moderation decisions."""
 
     def __init__(self, settings: ZammadAISettings) -> None:
+        """Initialize the Gemini moderation agent when moderation is enabled."""
         self.settings: ModerationSettings = settings.moderation
         self._enabled = self.settings.enabled
         self._agent: Any | None = None

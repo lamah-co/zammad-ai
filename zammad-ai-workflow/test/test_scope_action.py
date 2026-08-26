@@ -55,6 +55,9 @@ class FakeAnswerService:
             auto_publish=True,
         )
 
+    async def generate_conversational_answer(self, **kwargs) -> AnswerCandidate:
+        return await self.generate_answer(**kwargs)
+
 
 class FakeModerationService:
     """Return a configured moderation decision for generated responses."""

@@ -222,6 +222,16 @@ max_user_text_length: 2000
 # recursion_limit: 30
 
 # ============================================================================
+# Localization Configuration
+# ============================================================================
+localization:
+  default_language: ar
+  supported_languages:
+    - ar
+    - en
+  unsupported_language_action: human_review
+
+# ============================================================================
 # Triage Configuration
 # ============================================================================
 triage:
@@ -248,6 +258,12 @@ triage:
     - name: "ai_response"
       description: "Generate AI-powered response"
       type: "AIAnswer"
+    - name: "out_of_scope_static_response"
+      description: "Generic fallback for safe requests outside the supported assistant scope"
+      type: "StaticAnswer"
+      answer:
+        ar: "تم استلام رسالتك. يرجى إرسال تفاصيل مرتبطة بالخدمة حتى نتمكن من مساعدتك."
+        en: "Thanks for reaching out. Please send service-related details so we can help."
 
   # Fallback action name when no rule matches (must match an action name above)
   no_action_name: "no_action"

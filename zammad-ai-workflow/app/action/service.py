@@ -14,6 +14,7 @@ from app.settings.settings import ZammadAISettings
 from app.settings.triage import ActionTypes
 from app.settings.zammad import ZammadAPISettings, ZammadEAISettings
 from app.triage.triage import TriageResult
+from app.utils.localization import resolve_localized_text
 from app.utils.logging import getLogger
 from app.zammad.api import ZammadAPIClient
 from app.zammad.eai import ZammadEAIClient
@@ -54,6 +55,7 @@ class ActionService:
                 action_name=action,
                 user_text=triage.user_text,
                 session_id=session_id,
+                language=triage.language,
             )
 
             if isinstance(response, NoAnswerPossible):
@@ -68,6 +70,7 @@ class ActionService:
                         category == self.settings.triage.no_category_name
                         or triage.action.type == ActionTypes.NoAction
                     ),
+                    language=triage.language,
                 )
             elif triage.category.auto_publish and (
                 isinstance(response, StaticAnswer) or (isinstance(response, AnswerCandidate) and response.auto_publish)
@@ -114,6 +117,7 @@ class ActionService:
         action_name: str,
         user_text: str,
         session_id: str | None,
+        language: str | None = None,
     ) -> AnswerCandidate | StaticAnswer | NoAnswerPossible:
         """Resolve an answer payload for the given action and category.
 
@@ -177,7 +181,17 @@ class ActionService:
                 raise ActionExecutionError(
                     f"StaticAnswer action {action.name} is missing the 'answer' field", retryable=False
                 )
-            response = StaticAnswer(response=action.answer)
+            answer_text = resolve_localized_text(
+                action.answer,
+                language=language,
+                settings=self.settings.localization,
+            )
+            if not answer_text:
+                raise ActionExecutionError(
+                    f"StaticAnswer action {action.name} does not have a usable localized answer",
+                    retryable=False,
+                )
+            response = StaticAnswer(response=answer_text)
         else:
             raise ActionExecutionError(f"Unknown action type: {action.type}", retryable=False)
 
@@ -241,6 +255,7 @@ class ActionService:
         reason: str,
         customer_message: str,
         human_review: bool,
+        language: str | None,
     ) -> None:
         """Notify the customer and surface unresolved tickets for agent follow-up."""
         public_fallback = (
@@ -284,10 +299,16 @@ class ActionService:
                 f"Set handoff ticket {ticket_id} state to {self.settings.triage.handoff_ticket_state}"
             )
 
-        if public_fallback:
+        public_fallback_text = resolve_localized_text(
+            public_fallback,
+            language=language,
+            settings=self.settings.localization,
+        )
+
+        if public_fallback_text:
             await self.zammad_client.post_answer(
                 ticket_id=ticket_id,
-                text=public_fallback,
+                text=public_fallback_text,
                 subject="Answer",
                 internal=False,
             )
