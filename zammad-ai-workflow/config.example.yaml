@@ -242,6 +242,8 @@ triage:
       auto_publish: true # Optional: automatically publish AI response for this category
     - name: "Status Inquiries"
       auto_publish: false # Optional: do not automatically publish AI response for this category. Post Shared Draft instead for manual review.
+    - name: "Human handoff requested"
+      auto_publish: false # Explicit customer requests to speak with a human agent. Posts a handoff note and acknowledgement.
     - name: "Cannot Categorize"
       auto_publish: false
 
@@ -289,6 +291,11 @@ triage:
           operator: "greater_equals"
           value: 30
           action_name: "no_action"
+
+    # Explicit human-agent requests should be detected by LLM triage and routed
+    # to the handoff/no-action path without generating an AI answer.
+    - category_name: "Human handoff requested"
+      action_name: "no_action"
 
   # Prompt configuration
   # Jinja2 templating is now supported in all prompt files!

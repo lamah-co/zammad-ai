@@ -22,6 +22,7 @@ Follow these steps IN THIS ORDER:
 
 2. ANALYSIS (only if sender is a citizen)
    - Read the entire request; identify the MAIN CONCERN; ignore greetings/closings and quoted prior messages.
+   - If the current customer message explicitly asks to speak with a human, employee, agent, representative, or support team, choose the configured human-handoff category when present. This intent takes priority even when the message also contains an answerable support question.
    - Use signal words, attachments flag, and structural cues as defined in category definitions.
    - Focus on the NEW, topmost message: quoted staff replies or auto-notifications are NOT the current message.
    - Recognize auto notifications and DO NOT treat them as staff replies or as the user's intent.
@@ -29,7 +30,7 @@ Follow these steps IN THIS ORDER:
 3. CHECK CATEGORY LIST
    - Review ALL categories carefully
    - Eliminate any that are clearly not relevant
-   - Remember: "{{ no_category_name }}" is for staff replies, system messages, unclear content, OR topics outside the driver's license authority
+   - Remember: "{{ no_category_name }}" is for staff replies, system messages, unclear content, OR topics outside the configured support scope
 
 4. CATEGORY MATCHING
    - Compare against ALL categories and pick the MOST SPECIFIC match to the main concern
