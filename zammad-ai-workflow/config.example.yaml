@@ -24,7 +24,7 @@ usecase:
 # GenAI Configuration
 # ============================================================================
 genai:
-  sdk: "openai" # Options: "openai" or "anthropic"
+  sdk: "openai" # Options: "openai", "gemini", or "anthropic"
   max_retries: 3 # Maximum number of retries for API calls
   chat_model: "gpt-4.1-mini" # Model for chat completions
   triage_model: null # Optional override for triage model (fallback: chat_model)
@@ -60,6 +60,28 @@ genai:
 #  answer_temperature: 0.0 # Temperature for chat completions (0.0 = deterministic)
 #  judge_temperature: 0.0 # Temperature for chat completions (0.0 = deterministic)
 
+# Gemini-specific settings (use instead of the OpenAI block above)
+#  sdk: "gemini"
+#  max_retries: 3
+#  chat_model: "gemini-2.5-flash"
+#  triage_model: null
+#  answer_model: null
+#  judge_model: null
+#  embedding_model: "gemini-embedding-001"
+#  include_thoughts: false
+#  # Gemini 3+: set one thinking_level per role (minimal, low, medium, high).
+#  triage_thinking_level: null
+#  answer_thinking_level: null
+#  judge_thinking_level: null
+#  # Gemini 2.5: use thinking_budget instead (-1 dynamic, 0 off where supported,
+#  # or a positive token limit). Do not set level and budget for the same role.
+#  triage_thinking_budget: -1
+#  answer_thinking_budget: -1
+#  judge_thinking_budget: -1
+#  triage_temperature: 0.0
+#  answer_temperature: 0.0
+#  judge_temperature: 0.0
+
 # Note: OpenAI SDK requires environment variables (set in .env):
 #   OPENAI_API_KEY (required)
 #   OPENAI_BASE_URL (optional, for custom endpoints/proxies)
@@ -68,6 +90,9 @@ genai:
 # using sdk: "anthropic":
 #   ANTHROPIC_API_KEY (required)
 #   ANTHROPIC_API_URL (optional, for custom endpoints/proxies)
+#
+# Note: Native Gemini requires environment variables (set in .env):
+#   GOOGLE_API_KEY (Gemini Developer API)
 
 # ============================================================================
 # Zammad Configuration
@@ -113,11 +138,15 @@ zammad:
 # Set secret in .env file:
 #   ZAMMAD_AI_ANSWER__QDRANT__API_KEY (required)
 answer:
+  strategy: "agent" # Options: "agent" (tool calling) or "direct_rag" (single completion after Qdrant retrieval)
   agent_prompt:
     type: "file" # Options: "string", "file", "langfuse"
     prompt: "prompts/answer/agent.prompt.md"
     # Prompts can use Jinja2 syntax! Variables like {{ available_tools }}, {{ knowledge_base_enabled }},
     # {{ dlf_enabled }}, {{ disclaimer }} are automatically available.
+  direct_rag_prompt:
+    type: "file"
+    prompt: "prompts/answer/direct_rag.prompt.md"
   qdrant:
     url: "https://your-qdrant-instance.example.com"
     api_key: null # Set in .env: ZAMMAD_AI_ANSWER__QDRANT__API_KEY
@@ -129,7 +158,7 @@ answer:
   laws: []
     # Optional: expose indexed laws as separate agent tools.
     # - id: "fev"
-    #  name: "Fahrerlaubnis-Verordnung"
+    #   name: "Fahrerlaubnis-Verordnung"
   dlf:
     url: "https://your-dlf-backend.example.com/api"
     filter_categories: [] # Optional: list of categories to filter DLF results, or null for no filtering
@@ -193,6 +222,16 @@ max_user_text_length: 2000
 # recursion_limit: 30
 
 # ============================================================================
+# Localization Configuration
+# ============================================================================
+localization:
+  default_language: ar
+  supported_languages:
+    - ar
+    - en
+  unsupported_language_action: human_review
+
+# ============================================================================
 # Triage Configuration
 # ============================================================================
 triage:
@@ -203,6 +242,8 @@ triage:
       auto_publish: true # Optional: automatically publish AI response for this category
     - name: "Status Inquiries"
       auto_publish: false # Optional: do not automatically publish AI response for this category. Post Shared Draft instead for manual review.
+    - name: "Human handoff requested"
+      auto_publish: false # Explicit customer requests to speak with a human agent. Posts a handoff note and acknowledgement.
     - name: "Cannot Categorize"
       auto_publish: false
 
@@ -219,6 +260,12 @@ triage:
     - name: "ai_response"
       description: "Generate AI-powered response"
       type: "AIAnswer"
+    - name: "out_of_scope_static_response"
+      description: "Generic fallback for safe requests outside the supported assistant scope"
+      type: "StaticAnswer"
+      answer:
+        ar: "تم استلام رسالتك. يرجى إرسال تفاصيل مرتبطة بالخدمة حتى نتمكن من مساعدتك."
+        en: "Thanks for reaching out. Please send service-related details so we can help."
 
   # Fallback action name when no rule matches (must match an action name above)
   no_action_name: "no_action"
@@ -244,6 +291,11 @@ triage:
           operator: "greater_equals"
           value: 30
           action_name: "no_action"
+
+    # Explicit human-agent requests should be detected by LLM triage and routed
+    # to the handoff/no-action path without generating an AI answer.
+    - category_name: "Human handoff requested"
+      action_name: "no_action"
 
   # Prompt configuration
   # Jinja2 templating is now supported in all prompt files!

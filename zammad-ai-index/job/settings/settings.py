@@ -12,7 +12,7 @@ from pydantic_settings import (
     YamlConfigSettingsSource,
 )
 
-from .genai import GenAISettings
+from .genai import GenAIOpenAISettings, GenAISettings
 from .index import IndexJobSettings
 from .law import LawConfig
 from .logging import LoggingSettings
@@ -61,7 +61,8 @@ class ZammadAIIndexSettings(BaseSettings):
 
     genai: GenAISettings = Field(
         description="Settings for GenAI integration, including model selection and configuration.",
-        default_factory=lambda: GenAISettings(),
+        default_factory=lambda: GenAIOpenAISettings(),
+        discriminator="sdk",
     )
 
     zammad: ZammadAPISettings | ZammadEAISettings = Field(

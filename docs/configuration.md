@@ -25,7 +25,8 @@ Identifies the specific deployment or purpose of the service.
 
 Configures the interface to the Large Language Model.
 
-- `sdk`: Currently supports `openai`.
+- `sdk`: Supports `openai`, `gemini`, and `anthropic` in the workflow. The
+  index job supports `openai` and `gemini` embeddings.
 - `chat_model`: The model used for generating responses (e.g., `gpt-4o`).
 - `embedding_model`: The model used for vector search.
 - `temperature`: Creativity setting (0.0 recommended for consistent results).
@@ -81,6 +82,9 @@ Sensitive information must NOT be placed in `config.yaml`. Use context-specific 
 # OpenAI
 OPENAI_API_KEY=sk-...
 
+# Gemini Developer API (when genai.sdk is gemini)
+GOOGLE_API_KEY=...
+
 # Zammad
 ZAMMAD_AI_ZAMMAD__AUTH_TOKEN=...
 ZAMMAD_AI_ZAMMAD__RSS_FEED_TOKEN=...
@@ -93,3 +97,12 @@ LANGFUSE_PUBLIC_KEY=...
 LANGFUSE_SECRET_KEY=...
 LANGFUSE_HOST=...
 ```
+
+## Native Gemini Agent
+
+Use `genai.sdk: gemini` when running Gemini models. The native adapter preserves
+Gemini message metadata across LangChain tool calls. `sdk: openai` is reserved
+for OpenAI models and rejects Gemini model IDs.
+
+See [Gemini agent configuration](gemini-agent.md) for complete workflow/index
+examples, migration, and contract tests.

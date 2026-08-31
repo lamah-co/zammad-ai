@@ -2,7 +2,7 @@
 
 from typing import Literal
 
-from pydantic import BaseModel, Field, NonNegativeFloat, NonNegativeInt
+from pydantic import BaseModel, Field, NonNegativeFloat, NonNegativeInt, model_validator
 
 
 class BaseGenAISettings(BaseModel):
@@ -109,6 +109,57 @@ class GenAIOpenAISettings(BaseGenAISettings):
         return None
 
 
+ThinkingLevel = Literal["minimal", "low", "medium", "high"]
+
+
+class GenAIGeminiSettings(BaseGenAISettings):
+    """Gemini configuration using LangChain's native Google Gen AI adapter."""
+
+    sdk: Literal["gemini"] = Field(description="GenAI SDK to use", default="gemini")
+    chat_model: str = Field(default="gemini-2.5-flash", description="Native Gemini chat model")
+    embedding_model: str = Field(default="gemini-embedding-001", description="Native Gemini embedding model")
+    include_thoughts: bool = Field(description="Expose Gemini thought summaries in model responses", default=False)
+
+    triage_thinking_level: ThinkingLevel | None = Field(
+        default=None,
+        description="Gemini 3+ thinking level for triage",
+    )
+    answer_thinking_level: ThinkingLevel | None = Field(
+        default=None,
+        description="Gemini 3+ thinking level for answer generation",
+    )
+    judge_thinking_level: ThinkingLevel | None = Field(
+        default=None,
+        description="Gemini 3+ thinking level for answer evaluation",
+    )
+    triage_thinking_budget: int | None = Field(
+        default=None,
+        ge=-1,
+        description="Gemini 2.5 thinking token budget for triage",
+    )
+    answer_thinking_budget: int | None = Field(
+        default=None,
+        ge=-1,
+        description="Gemini 2.5 thinking token budget for answer generation",
+    )
+    judge_thinking_budget: int | None = Field(
+        default=None,
+        ge=-1,
+        description="Gemini 2.5 thinking token budget for answer evaluation",
+    )
+
+    @model_validator(mode="after")
+    def validate_thinking_controls(self) -> "GenAIGeminiSettings":
+        """Reject simultaneous Gemini 2.5 and Gemini 3+ thinking controls."""
+        for role in ("triage", "answer", "judge"):
+            if (
+                getattr(self, f"{role}_thinking_level") is not None
+                and getattr(self, f"{role}_thinking_budget") is not None
+            ):
+                raise ValueError(f"{role} thinking_level and thinking_budget cannot both be configured")
+        return self
+
+
 # Anthropic effort levels
 EffortType = Literal["max", "xhigh", "high", "medium", "low"]
 
@@ -159,7 +210,7 @@ class GenAIAnthropicSettings(BaseGenAISettings):
     )
 
 
-GenAIProviderSettings = GenAIOpenAISettings | GenAIAnthropicSettings
+GenAIProviderSettings = GenAIOpenAISettings | GenAIGeminiSettings | GenAIAnthropicSettings
 
 try:
     from .settings import ZammadAISettings

@@ -96,6 +96,7 @@ def _build_answer_service(
     )
     service.langfuse_client = FakeLangfuseClient()
     service.user_message_template = FakePromptTemplate()
+    service.answer_strategy = "agent"
     service.agent = AsyncMock()
     service.agent.ainvoke = ainvoke
     service.agent_context = object()

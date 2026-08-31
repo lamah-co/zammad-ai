@@ -5,10 +5,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import Enum
 
-from app.utils.logging import getLogger
-
-logger = getLogger("zammad-ai.errors")
-
 
 @dataclass(slots=True, frozen=True)
 class ExceptionDecision:
@@ -65,6 +61,10 @@ class ZammadAuthError(ZammadPermanentError):
 
 class ZammadPayloadParseError(ZammadPermanentError):
     """Raised when Zammad response payload parsing fails."""
+
+
+class UnsupportedReplyChannelError(ZammadPermanentError):
+    """Raised when a public answer cannot be mapped to a delivery channel."""
 
 
 class DLFError(AppError):
@@ -131,6 +131,12 @@ class GenAIModelError(GenAIError):
     """Other model/provider errors."""
 
     retryable = True
+
+
+class GenAIProtocolError(GenAIError):
+    """Permanent provider message/tool protocol incompatibility."""
+
+    retryable = False
 
 
 class TriageError(AppError):
@@ -201,6 +207,17 @@ def classify_provider_error(error: Exception) -> GenAIError:
     """Map provider/library exceptions to a typed GenAI error class."""
     error_name = f"{type(error).__module__}.{type(error).__name__}".lower()
     message = str(error).lower()
+    if any(
+        token in message
+        for token in (
+            "thought_signature",
+            "malformed_function_call",
+            "malformed function call",
+            "invalid tool history",
+            "function response name cannot be empty",
+        )
+    ):
+        return GenAIProtocolError("GenAI tool-call protocol is invalid")
     if "timeout" in error_name or "timeout" in message:
         return GenAITimeoutError("GenAI request timed out")
 

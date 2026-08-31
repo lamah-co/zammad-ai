@@ -1,8 +1,11 @@
 """Unit tests for shared error taxonomy classifiers."""
 
+import pytest
+
 from app.errors import (
     AckDecision,
     GenAIAuthError,
+    GenAIProtocolError,
     GenAIQuotaError,
     TriageCategoryWrongError,
     classify_exception,
@@ -59,3 +62,19 @@ def test_classify_provider_error_timeout_and_auth() -> None:
 
     assert type(timeout_error).__name__ == "GenAITimeoutError"
     assert type(auth_error).__name__ == "GenAIAuthError"
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        "Function call is missing a thought_signature.",
+        "MALFORMED_FUNCTION_CALL",
+        "Invalid tool history: function response name cannot be empty",
+    ],
+)
+def test_classify_provider_protocol_errors_as_permanent(message: str) -> None:
+    """Retrying a deterministic tool protocol error must not repeat the request."""
+    error = classify_provider_error(RuntimeError(message))
+
+    assert isinstance(error, GenAIProtocolError)
+    assert error.retryable is False

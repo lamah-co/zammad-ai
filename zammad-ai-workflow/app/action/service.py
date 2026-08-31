@@ -3,15 +3,18 @@
 from logging import Logger
 
 from app.answer.service import AnswerService, get_answer_service
-from app.errors import ActionExecutionError, AppError
+from app.errors import ActionExecutionError, AppError, UnsupportedReplyChannelError
 from app.guardrails import GuardrailService, get_guardrail_service
 from app.models.answer import AnswerCandidate, NoAnswerPossible, StaticAnswer
 from app.models.guardrails import GuardrailResponseResult, GuardrailResult
+from app.models.moderation import ModerationResult
 from app.models.triage import Action
+from app.moderation import GeminiModerationService, get_moderation_service
 from app.settings.settings import ZammadAISettings
 from app.settings.triage import ActionTypes
 from app.settings.zammad import ZammadAPISettings, ZammadEAISettings
 from app.triage.triage import TriageResult
+from app.utils.localization import resolve_localized_text
 from app.utils.logging import getLogger
 from app.zammad.api import ZammadAPIClient
 from app.zammad.eai import ZammadEAIClient
@@ -21,12 +24,15 @@ class ActionService:
     """Execute ticket actions based on triage category and action type."""
 
     logger: Logger = getLogger("zammad-ai.action.service")
+    conversational_action_name = "conversational_ai_answer"
+    conversational_category_name = "Conversational support"
 
     def __init__(self, settings: ZammadAISettings, answer_service: AnswerService):
         """Initialize action execution with settings, answer service, guardrail service, and Zammad client."""
         self.settings: ZammadAISettings = settings
         self.answer_service: AnswerService = answer_service
         self.guardrail_service: GuardrailService = get_guardrail_service(settings=settings.guardrails)
+        self.moderation_service: GeminiModerationService = get_moderation_service(settings=settings)
         self.max_user_text_length: int = settings.max_user_text_length
         # Zammad client setup
         if isinstance(self.settings.zammad, ZammadAPISettings):
@@ -49,35 +55,37 @@ class ActionService:
                 action_name=action,
                 user_text=triage.user_text,
                 session_id=session_id,
+                language=triage.language,
             )
 
             if isinstance(response, NoAnswerPossible):
                 self.logger.info(f"No answer generated for ticket {ticket_id} with category {category}")
-                if not self.settings.triage.no_action_internal_note:
-                    return
-                text: str = _safe_format(
-                    template=self.settings.triage.no_action_internal_note,
+                await self._execute_handoff(
+                    ticket_id=ticket_id,
                     category=category,
                     action=action,
                     reason=f"{reason}\n\nNo answer possible. Explanation:\n{response.reasoning}",
+                    customer_message=triage.user_text,
+                    human_review=(
+                        category == self.settings.triage.no_category_name
+                        or triage.action.type == ActionTypes.NoAction
+                    ),
+                    language=triage.language,
                 )
-
-                await self.zammad_client.post_answer(
-                    ticket_id=ticket_id,
-                    text=text,
-                    subject="No answer generation possible",
-                    internal=True,  # Post an internal note if no answer is generated to document the triage result and action execution
-                )
-                self.logger.info(f"Posted internal note for ticket {ticket_id} with category {category}")
             elif triage.category.auto_publish and (
                 isinstance(response, StaticAnswer) or (isinstance(response, AnswerCandidate) and response.auto_publish)
             ):
-                await self.zammad_client.post_answer(
-                    ticket_id=ticket_id,
-                    text=response.response,
-                    subject=response.subject if isinstance(response, AnswerCandidate) else "Answer",
-                    internal=False,
-                )
+                try:
+                    await self.zammad_client.post_answer(
+                        ticket_id=ticket_id,
+                        text=response.response,
+                        subject=response.subject if isinstance(response, AnswerCandidate) else "Answer",
+                        internal=False,
+                    )
+                except UnsupportedReplyChannelError as error:
+                    await self.zammad_client.post_shared_draft(ticket_id=ticket_id, text=response.response)
+                    self.logger.warning(f"Saved answer as shared draft for ticket {ticket_id}: {error}")
+                    return
                 self.logger.info(f"Posted answer for ticket {ticket_id} with category {category}")
                 # Optionally schedule the ticket to be moved to a pending-close state after configured days
                 try:
@@ -109,6 +117,7 @@ class ActionService:
         action_name: str,
         user_text: str,
         session_id: str | None,
+        language: str | None = None,
     ) -> AnswerCandidate | StaticAnswer | NoAnswerPossible:
         """Resolve an answer payload for the given action and category.
 
@@ -157,21 +166,53 @@ class ActionService:
                 )
             )
         elif action.type == ActionTypes.AIAnswer:
-            response = await self.answer_service.generate_answer(
-                user_text=user_text, category=category_name, session_id=session_id
-            )
+            if self._is_conversational_action(action=action, category_name=category_name):
+                response = await self.answer_service.generate_conversational_answer(
+                    user_text=user_text,
+                    session_id=session_id,
+                )
+            else:
+                response = await self.answer_service.generate_answer(
+                    user_text=user_text, category=category_name, session_id=session_id
+                )
         elif action.type == ActionTypes.StaticAnswer:
             # The settings validator ensures that if the type is StaticAnswer, the answer field is not None, so we can safely access it here
             if not action.answer:
                 raise ActionExecutionError(
                     f"StaticAnswer action {action.name} is missing the 'answer' field", retryable=False
                 )
-            response = StaticAnswer(response=action.answer)
+            answer_text = resolve_localized_text(
+                action.answer,
+                language=language,
+                settings=self.settings.localization,
+            )
+            if not answer_text:
+                raise ActionExecutionError(
+                    f"StaticAnswer action {action.name} does not have a usable localized answer",
+                    retryable=False,
+                )
+            response = StaticAnswer(response=answer_text)
         else:
             raise ActionExecutionError(f"Unknown action type: {action.type}", retryable=False)
 
         # Evaluate guardrails on the generated response as well
         if isinstance(response, AnswerCandidate):
+            moderation_result: ModerationResult = await self.moderation_service.moderate_response(
+                prompt=user_text,
+                response=response.response,
+                session_id=session_id,
+            )
+            if self.settings.moderation.enabled:
+                self.logger.info(
+                    f"Gemini moderation for generated response on ticket {ticket_id if ticket_id is not None else 'unknown'}: decision={moderation_result.decision}, route={moderation_result.customer_response_type}, risk={moderation_result.risk_level}"
+                )
+            if (
+                self.settings.moderation.enabled
+                and self.settings.moderation.block_on_unsafe
+                and moderation_result.customer_response_type == "human_review"
+            ):
+                response.auto_publish = False
+
             response_guardrail_result: GuardrailResponseResult = await self.guardrail_service.evaluate_response(
                 text=user_text, response=response.response
             )
@@ -190,6 +231,10 @@ class ActionService:
 
         return response
 
+    def _is_conversational_action(self, *, action: Action, category_name: str) -> bool:
+        """Identify the configured conversational route without requiring legacy moderation settings."""
+        return action.name == self.conversational_action_name or category_name == self.conversational_category_name
+
     async def cleanup(self) -> None:
         """Close internal clients and reset the module-level service reference.
 
@@ -200,6 +245,74 @@ class ActionService:
         finally:
             global _service
             _service = None
+
+    async def _execute_handoff(
+        self,
+        *,
+        ticket_id: int,
+        category: str,
+        action: str,
+        reason: str,
+        customer_message: str,
+        human_review: bool,
+        language: str | None,
+    ) -> None:
+        """Notify the customer and surface unresolved tickets for agent follow-up."""
+        public_fallback = (
+            self.settings.triage.human_review_public_fallback
+            if human_review
+            else self.settings.triage.no_answer_public_fallback
+        )
+        internal_note_template = (
+            self.settings.triage.human_review_internal_note
+            if human_review
+            else self.settings.triage.no_answer_internal_note or self.settings.triage.no_action_internal_note
+        )
+        tag = self.settings.triage.human_review_tag if human_review else self.settings.triage.no_answer_tag
+
+        if internal_note_template:
+            text: str = _safe_format(
+                template=internal_note_template,
+                category=category,
+                action=action,
+                reason=reason,
+                customer_message=customer_message,
+            )
+            await self.zammad_client.post_answer(
+                ticket_id=ticket_id,
+                text=text,
+                subject="Handoff",
+                internal=True,
+            )
+            self.logger.info(f"Posted handoff internal note for ticket {ticket_id} with category {category}")
+
+        if tag:
+            await self.zammad_client.add_tag_to_ticket(ticket_id=ticket_id, tag=tag)
+            self.logger.info(f"Tagged handoff ticket {ticket_id} with {tag}")
+
+        if self.settings.triage.handoff_ticket_state:
+            await self.zammad_client.set_ticket_state(
+                ticket_id=ticket_id,
+                state=self.settings.triage.handoff_ticket_state,
+            )
+            self.logger.info(
+                f"Set handoff ticket {ticket_id} state to {self.settings.triage.handoff_ticket_state}"
+            )
+
+        public_fallback_text = resolve_localized_text(
+            public_fallback,
+            language=language,
+            settings=self.settings.localization,
+        )
+
+        if public_fallback_text:
+            await self.zammad_client.post_answer(
+                ticket_id=ticket_id,
+                text=public_fallback_text,
+                subject="Answer",
+                internal=False,
+            )
+            self.logger.info(f"Posted handoff acknowledgement for ticket {ticket_id} with category {category}")
 
 
 class _SafeFormatDict(dict[str, str]):

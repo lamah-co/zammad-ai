@@ -16,6 +16,7 @@ from app.errors import (
     TriageError as AppTriageError,
 )
 from app.guardrails import GuardrailService, get_guardrail_service
+from app.models.moderation import ModerationResult
 from app.models.triage import (
     CategorizationResult,
     DaysSinceRequestResponse,
@@ -23,6 +24,7 @@ from app.models.triage import (
     TriageResult,
 )
 from app.models.zammad import ArticleAttachment, ZammadTicket
+from app.moderation import GeminiModerationService, get_moderation_service
 from app.preparser.service import PreparserService, get_preparser_service
 from app.settings import ZammadAISettings
 from app.settings.triage import (
@@ -36,6 +38,7 @@ from app.settings.triage import (
     TriagePrompt,
 )
 from app.settings.zammad import ZammadAPISettings, ZammadEAISettings
+from app.utils.localization import normalize_supported_language
 from app.utils.logging import getLogger
 from app.utils.paths import get_prompts_dir
 from app.utils.prompts import load_prompt
@@ -79,6 +82,7 @@ class TriageService:
         """
         self.settings: ZammadAISettings = settings
         self.guardrail_service: GuardrailService = get_guardrail_service(settings=settings.guardrails)
+        self.moderation_service: GeminiModerationService = get_moderation_service(settings=settings)
         self.preparser_service: PreparserService = get_preparser_service(settings=settings.preparser)
         # Triage setup
         self.categories: list[Category] = settings.triage.categories
@@ -195,11 +199,15 @@ class TriageService:
                     reasoning="No articles found",
                     confidence=1.0,
                     action=self.no_action,
+                    language=self.settings.localization.default_language,
                     extracted_values=None,
                 )
 
             # Step 2: Extract customer message, attachments and generate session ID for Langfuse
-            customer_message: str = ticket.articles[0].text
+            customer_article = ticket.latest_customer_article()
+            if customer_article is None:
+                raise TriageError(f"Ticket {ticket.id} contains no processable article", retryable=False)
+            customer_message: str = customer_article.text
 
             # Run preparser first (may be a no-op when disabled)
             # Important: Preparse BEFORE any truncation to keep behavior consistent
@@ -216,7 +224,7 @@ class TriageService:
                 )
                 customer_message = customer_message[: self.max_user_text_length]
 
-            attachments: list[ArticleAttachment] = ticket.articles[0].attachments or []
+            attachments: list[ArticleAttachment] = customer_article.attachments or []
             if self.settings.zammad.document_parsing.mode == "off":
                 logger.debug("Document parsing is turned off, skipping attachment content.")
                 customer_message += f"\n\n{len(attachments)} attachments were included."
@@ -225,7 +233,7 @@ class TriageService:
                     try:
                         data: str | None = await self.zammad_client.fetch_ticket_attachment_data(
                             ticket_id=ticket.id,
-                            article_id=ticket.articles[0].id,
+                            article_id=customer_article.id,
                             attachment=attachment,
                         )
                     except (ZammadRetryableError, ZammadConnectionError) as e:
@@ -255,6 +263,30 @@ class TriageService:
 
                     customer_message += attachment_message
 
+            moderation_result = await self.moderation_service.moderate_prompt(customer_message)
+            language = normalize_supported_language(moderation_result.language, self.settings.localization)
+            if language is None and self.settings.localization.unsupported_language_action == "human_review":
+                outcome = "success"
+                return TriageResult(
+                    user_text=customer_message,
+                    category=self.no_category,
+                    action=self.no_action,
+                    reasoning=(
+                        f"Unsupported customer language '{moderation_result.language}' detected by moderation; "
+                        "routing to human review."
+                    ),
+                    confidence=0.0,
+                    language=self.settings.localization.default_language,
+                    extracted_values=None,
+                )
+            if language is None:
+                language = self.settings.localization.default_language
+
+            moderated_triage = self._triage_from_moderation(customer_message, moderation_result, language=language)
+            if moderated_triage is not None:
+                outcome = "success"
+                return moderated_triage
+
             session_id: str = self.genai_handler.langfuse_client.generate_session_id()
 
             # Step 3: Predict category using LLM
@@ -278,6 +310,7 @@ class TriageService:
                 action=action,
                 reasoning=categorization.reasoning,
                 confidence=categorization.confidence,
+                language=language,
                 extracted_values=categorization.extracted_values,
             )
         finally:
@@ -450,6 +483,58 @@ class TriageService:
             The matching Action or no_action as fallback
         """
         return self.actions_by_name.get(action_name, self.no_action)
+
+    def _triage_from_moderation(
+        self, customer_message: str, moderation_result: ModerationResult, *, language: str
+    ) -> TriageResult | None:
+        """Convert authoritative Gemini moderation decisions into triage results."""
+        if not self.settings.moderation.enabled or moderation_result.decision == "safe_support":
+            return None
+
+        if moderation_result.decision == "small_talk":
+            category = self._name_to_category(self.settings.moderation.small_talk_category_name)
+            action = self._name_to_action(
+                next(
+                    (
+                        rule.action_name
+                        for rule in self.action_rules
+                        if rule.category_name == category.name and rule.conditions is None
+                    ),
+                    self.no_action.name,
+                )
+            )
+            return TriageResult(
+                user_text=customer_message,
+                category=category,
+                action=action,
+                reasoning=moderation_result.reason,
+                confidence=1.0 if moderation_result.risk_level == "low" else 0.7,
+                language=language,
+                extracted_values=None,
+            )
+
+        if moderation_result.decision == "out_of_scope":
+            category = Category(name=self.settings.moderation.out_of_scope_category_name, auto_publish=True)
+            action = self._name_to_action(self.settings.moderation.out_of_scope_action_name)
+            return TriageResult(
+                user_text=customer_message,
+                category=category,
+                action=action,
+                reasoning=moderation_result.reason,
+                confidence=1.0 if moderation_result.risk_level == "low" else 0.7,
+                language=language,
+                extracted_values=None,
+            )
+
+        return TriageResult(
+            user_text=customer_message,
+            category=self.no_category,
+            action=self.no_action,
+            reasoning=moderation_result.reason,
+            confidence=0.0 if moderation_result.decision == "unsafe" else 0.4,
+            language=language,
+            extracted_values=None,
+        )
 
     async def cleanup(self) -> None:
         """Release resources held by the TriageService and clear the global singleton.

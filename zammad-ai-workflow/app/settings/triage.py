@@ -8,6 +8,9 @@ from typing import ClassVar, Literal
 
 from pydantic import BaseModel, Field, FilePath, model_validator
 
+from app.settings.localization import LocalizedText
+from app.utils.localization import is_blank_localized_text
+
 
 class TriageSettings(BaseModel):
     """Settings for triage categories, actions, rules, and prompts."""
@@ -19,6 +22,34 @@ class TriageSettings(BaseModel):
     no_action_internal_note: str | None = Field(
         default=None,
         description="Internal note text to post when triage results in no action. When None, no internal note will be posted. Use the following variables in the note: {category} for the assigned category, {action} for the assigned action, and {reason} for the reason behind the triage decision.",
+    )
+    no_answer_public_fallback: LocalizedText | None = Field(
+        default=None,
+        description="Public fallback sent when an AI answer cannot be generated. May be a string or a language map.",
+    )
+    no_answer_internal_note: str | None = Field(
+        default=None,
+        description="Internal note posted when an AI answer cannot be generated. Supports {category}, {action}, {reason}, and {customer_message}.",
+    )
+    no_answer_tag: str | None = Field(
+        default=None,
+        description="Tag added when an AI answer cannot be generated.",
+    )
+    human_review_public_fallback: LocalizedText | None = Field(
+        default=None,
+        description="Public acknowledgement sent when the selected outcome requires human review. May be a string or a language map.",
+    )
+    human_review_internal_note: str | None = Field(
+        default=None,
+        description="Internal note posted when the selected outcome requires human review. Supports {category}, {action}, {reason}, and {customer_message}.",
+    )
+    human_review_tag: str | None = Field(
+        default=None,
+        description="Tag added when the selected outcome requires human review.",
+    )
+    handoff_ticket_state: str | None = Field(
+        default=None,
+        description="Ticket state to apply to handoff outcomes. Leave unset to avoid changing state.",
     )
     action_rules: list["ActionRule"]
     prompts: StringTriagePrompts | FileTriagePrompts | LangfuseTriagePrompts = Field(
@@ -123,7 +154,7 @@ class TriageSettings(BaseModel):
 
         # Validate that all StaticAnswer actions have a non-empty answer configured
         for action in self.actions:
-            if action.type == ActionTypes.StaticAnswer and (action.answer is None or not action.answer.strip()):
+            if action.type == ActionTypes.StaticAnswer and is_blank_localized_text(action.answer):
                 errors.append(f"Action '{action.name}' has type StaticAnswer but answer is None or empty")
 
         # Validate that prompts are properly configured based on their type
@@ -135,25 +166,30 @@ class TriageSettings(BaseModel):
         return self
 
     @model_validator(mode="before")
-    def validate_no_action_internal_note_variables(cls, values: dict) -> dict:
-        """Validate that the no_action_internal_note only contains valid variables."""
-        note: str | None = values.get("no_action_internal_note")
-        if note is None:
-            return values
+    def validate_note_template_variables(cls, values: dict) -> dict:
+        """Validate internal-note templates only use supported variables."""
+        note_fields = ("no_action_internal_note", "no_answer_internal_note", "human_review_internal_note")
+        valid_variables = {"category", "action", "reason", "customer_message"}
 
-        try:
-            list(Formatter().parse(note))
-        except ValueError as e:
-            raise ValueError(f"no_action_internal_note has invalid format syntax: {e}")
+        for field_name in note_fields:
+            note: str | None = values.get(field_name)
+            if note is None:
+                continue
 
-        valid_variables = {"{category}", "{action}", "{reason}"}
-        used_variables = {part for part in note.split() if part.startswith("{") and part.endswith("}")}
-        invalid_variables = used_variables - valid_variables
+            try:
+                parsed = list(Formatter().parse(note))
+            except ValueError as e:
+                raise ValueError(f"{field_name} has invalid format syntax: {e}")
 
-        if invalid_variables:
-            raise ValueError(
-                f"no_action_internal_note contains invalid variables: {invalid_variables}. Valid variables are: {valid_variables}"
-            )
+            invalid_variables = {
+                field
+                for _literal_text, field, _format_spec, _conversion in parsed
+                if field is not None and field not in valid_variables
+            }
+            if invalid_variables:
+                raise ValueError(
+                    f"{field_name} contains invalid variables: {invalid_variables}. Valid variables are: {valid_variables}"
+                )
 
         return values
 
@@ -179,7 +215,7 @@ class Action(BaseModel):
     name: str
     description: str
     type: ActionTypes
-    answer: str | None = None
+    answer: LocalizedText | None = None
 
 
 class ActionRule(BaseModel):

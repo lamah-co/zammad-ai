@@ -5,17 +5,13 @@ from typing import Literal
 from pydantic import BaseModel, Field, NonNegativeFloat, NonNegativeInt
 
 
-class GenAISettings(BaseModel):
+class BaseGenAISettings(BaseModel):
     """Settings for GenAI integration, including model selection and configuration.
 
     API keys and URLs are expected to be provided via environment variables or other secure means.
     """
 
     # General configuration
-    sdk: Literal["openai"] = Field(
-        description="GenAI SDK to use",
-        default="openai",
-    )
     max_retries: NonNegativeInt = Field(
         description="Maximum retry attempts",
         default=3,
@@ -72,3 +68,19 @@ class GenAISettings(BaseModel):
                 "summary": "detailed",
             }
         return None
+
+
+class GenAIOpenAISettings(BaseGenAISettings):
+    """OpenAI embedding configuration for the index job."""
+
+    sdk: Literal["openai"] = Field(description="GenAI SDK to use", default="openai")
+
+class GenAIGeminiSettings(BaseGenAISettings):
+    """Gemini embedding configuration using the native Google adapter."""
+
+    sdk: Literal["gemini"] = Field(description="GenAI SDK to use", default="gemini")
+    chat_model: str = Field(default="gemini-2.5-flash", description="Native Gemini chat model")
+    embedding_model: str = Field(default="gemini-embedding-001", description="Native Gemini embedding model")
+
+
+GenAISettings = GenAIOpenAISettings | GenAIGeminiSettings
