@@ -1,6 +1,5 @@
 """Helpers for resolving customer-facing localized text."""
 
-
 from app.settings.localization import LocalizationSettings, LocalizedText
 
 

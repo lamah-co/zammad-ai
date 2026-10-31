@@ -182,9 +182,7 @@ class AnswerSettings(BaseModel):
 
     strategy: Literal["agent", "direct_rag"] = Field(
         default="agent",
-        description=(
-            "Answer orchestration strategy. direct_rag avoids model tool calls for compatible endpoints."
-        ),
+        description=("Answer orchestration strategy. direct_rag avoids model tool calls for compatible endpoints."),
     )
 
     agent_prompt: PromptSourceConfig = Field(

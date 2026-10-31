@@ -10,10 +10,12 @@ class FakeModerationAgent:
     """Return a configured structured moderation result."""
 
     def __init__(self, result: ModerationResult) -> None:
+        """Store the result returned by every invocation."""
         self.result = result
         self.calls: list[dict] = []
 
     async def ainvoke(self, *, input: dict, config: object) -> dict:
+        """Record the call and return the configured structured response."""
         self.calls.append({"input": input, "config": config})
         return {"structured_response": self.result}
 

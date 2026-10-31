@@ -15,6 +15,7 @@ class RecordingZammadClient:
     """Record outbound writes made by ActionService."""
 
     def __init__(self) -> None:
+        """Start with no recorded writes."""
         self.answers: list[dict[str, object]] = []
         self.shared_drafts: list[dict[str, object]] = []
 
@@ -25,6 +26,7 @@ class RecordingZammadClient:
         subject: str | None = None,
         internal: bool = False,
     ) -> None:
+        """Record a public or internal answer."""
         self.answers.append(
             {
                 "ticket_id": ticket_id,
@@ -35,9 +37,11 @@ class RecordingZammadClient:
         )
 
     async def post_shared_draft(self, ticket_id: int, text: str) -> None:
+        """Record a shared draft."""
         self.shared_drafts.append({"ticket_id": ticket_id, "text": text})
 
     async def close(self) -> None:
+        """Satisfy the client interface."""
         return None
 
 
@@ -45,6 +49,7 @@ class FakeAnswerService:
     """Return a configured AI answer candidate."""
 
     async def generate_answer(self, **_kwargs) -> AnswerCandidate:
+        """Return a publishable answer candidate."""
         return AnswerCandidate(
             response=(
                 "This is a generated support reply with enough content to satisfy the schema minimum length. "
@@ -56,6 +61,7 @@ class FakeAnswerService:
         )
 
     async def generate_conversational_answer(self, **kwargs) -> AnswerCandidate:
+        """Return the same candidate as the knowledge-base path."""
         return await self.generate_answer(**kwargs)
 
 
@@ -63,6 +69,7 @@ class FakeModerationService:
     """Return a configured moderation decision for generated responses."""
 
     async def moderate_response(self, **_kwargs) -> ModerationResult:
+        """Return an unsafe moderation decision."""
         return ModerationResult(
             decision="unsafe",
             language="ar",

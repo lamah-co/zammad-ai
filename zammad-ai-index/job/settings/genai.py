@@ -75,6 +75,7 @@ class GenAIOpenAISettings(BaseGenAISettings):
 
     sdk: Literal["openai"] = Field(description="GenAI SDK to use", default="openai")
 
+
 class GenAIGeminiSettings(BaseGenAISettings):
     """Gemini embedding configuration using the native Google adapter."""
 

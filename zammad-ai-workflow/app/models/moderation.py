@@ -4,7 +4,6 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-
 ModerationDecision = Literal["safe_support", "small_talk", "out_of_scope", "unsafe", "uncertain"]
 ModerationRiskLevel = Literal["low", "medium", "high"]
 ModerationRoute = Literal["continue_triage", "conversational_ai", "static_fallback", "human_review"]

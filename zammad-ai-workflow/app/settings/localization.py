@@ -17,7 +17,7 @@ class LocalizationSettings(BaseModel):
         description="Language used when a supported language cannot be confidently detected.",
     )
     supported_languages: list[SupportedLanguage] = Field(
-        default_factory=lambda: ["ar", "en"],
+        default=["ar", "en"],
         description="Customer languages supported by the automated workflow.",
     )
     unsupported_language_action: UnsupportedLanguageAction = Field(

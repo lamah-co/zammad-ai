@@ -82,9 +82,7 @@ class AnswerService:
 
         self.answer_strategy = settings.answer.strategy
         answer_prompt_config = (
-            settings.answer.direct_rag_prompt
-            if self.answer_strategy == "direct_rag"
-            else settings.answer.agent_prompt
+            settings.answer.direct_rag_prompt if self.answer_strategy == "direct_rag" else settings.answer.agent_prompt
         )
         self.agent_prompt, self.agent_prompt_version = self._resolve_prompt(
             prompt_config=answer_prompt_config,
@@ -115,9 +113,12 @@ class AnswerService:
             template=user_msg_template_str,
         )
 
-        self.agent: CompiledStateGraph[
-            AgentState[AnswerCandidate], AgentContext, AgentState, AgentState[AnswerCandidate]  # type: ignore
-        ] | None = (
+        self.agent: (
+            CompiledStateGraph[
+                AgentState[AnswerCandidate], AgentContext, AgentState, AgentState[AnswerCandidate]  # type: ignore
+            ]
+            | None
+        ) = (
             build_agent(
                 genai_settings=settings.genai,
                 system_prompt=self.agent_prompt,
@@ -128,9 +129,7 @@ class AnswerService:
             else None
         )
         self.direct_rag_model = (
-            get_chat_model(settings.genai, "answer")
-            if self.answer_strategy == "direct_rag"
-            else None
+            get_chat_model(settings.genai, "answer") if self.answer_strategy == "direct_rag" else None
         )
         self.qdrant_kb_client = QdrantKBClient(
             genai_settings=settings.genai,
@@ -291,9 +290,7 @@ class AnswerService:
 
         context_parts: list[str] = []
         for index, (document, score) in enumerate(documents_with_scores, start=1):
-            context_parts.append(
-                self._format_direct_rag_document(index=index, document=document, score=score)
-            )
+            context_parts.append(self._format_direct_rag_document(index=index, document=document, score=score))
         direct_message = HumanMessage(
             content=(
                 f"Category: {category}\nCustomer question: {user_text}\n\n"
@@ -312,10 +309,7 @@ class AnswerService:
     def _format_direct_rag_document(index: int, document: Document, score: float) -> str:
         title = document.metadata.get("title") or document.metadata.get("name") or f"Document {index}"
         url = (
-            document.metadata.get("url")
-            or document.metadata.get("source_url")
-            or document.metadata.get("source")
-            or ""
+            document.metadata.get("url") or document.metadata.get("source_url") or document.metadata.get("source") or ""
         )
         return f"[{index}] {title}\nURL: {url}\nRelevance: {score:.3f}\nContent:\n{document.page_content}"
 

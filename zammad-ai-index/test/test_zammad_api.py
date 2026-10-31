@@ -2,7 +2,10 @@
 
 import os
 
-os.environ.setdefault("ZAMMAD_AI_ZAMMAD", '{"type":"api","base_url":"https://zammad.example.com","knowledge_base_id":2,"auth_token":"test-token"}')
+os.environ.setdefault(
+    "ZAMMAD_AI_ZAMMAD",
+    '{"type":"api","base_url":"https://zammad.example.com","knowledge_base_id":2,"auth_token":"test-token"}',
+)
 
 from job.settings.zammad import ZammadAPISettings
 from job.zammad.api import ZammadAPIClient
@@ -12,9 +15,9 @@ def test_get_kb_answer_uses_translation_content_id(monkeypatch) -> None:
     """Current Zammad keys rich-text content by content ID, not answer ID."""
     client = ZammadAPIClient(
         ZammadAPISettings(
-            base_url="https://zammad.example.com",
+            base_url="https://zammad.example.com",  # type: ignore
             knowledge_base_id=2,
-            auth_token="test-token",
+            auth_token="test-token",  # type: ignore
         )
     )
     first_response = {

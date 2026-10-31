@@ -1,6 +1,7 @@
 """Regression tests for channel-aware replies and ticket article selection."""
 
 from datetime import datetime, timezone
+from typing import Any
 
 import pytest
 
@@ -15,7 +16,7 @@ async def test_post_answer_uses_latest_customer_article_channel(settings_factory
     settings = settings_factory().zammad
     assert isinstance(settings, ZammadAPISettings)
     client = ZammadAPIClient(settings=settings)
-    requests: list[dict[str, object]] = []
+    requests: list[dict[str, Any]] = []
 
     async def fake_get_ticket(_ticket_id: int) -> ZammadTicket:
         return ZammadTicket(
@@ -47,8 +48,8 @@ async def test_post_answer_uses_latest_customer_article_channel(settings_factory
     async def fake_request(method: str, url: str, **kwargs) -> None:
         requests.append({"method": method, "url": url, "json": kwargs["json"]})
 
-    client.get_ticket = fake_get_ticket  # type: ignore[method-assign]
-    client._request = fake_request  # type: ignore[method-assign]
+    client.get_ticket = fake_get_ticket  # type: ignore
+    client._request = fake_request  # type: ignore
 
     await client.post_answer(ticket_id=5, text="hello", subject="Answer", internal=False)
 
@@ -56,8 +57,9 @@ async def test_post_answer_uses_latest_customer_article_channel(settings_factory
     assert payload["type"] == "whatsapp message"
     assert payload["sender"] == "Agent"
     assert payload["internal"] is False
-    assert payload["from"] == "Lamah Sanad (+218 93-4363964)"
-    assert payload["to"] == "Asma (+218910055964)"
+    # Zammad resolves the WhatsApp recipient from ticket preferences, so the payload must not set addressing.
+    assert "from" not in payload
+    assert "to" not in payload
 
 
 def test_latest_customer_article_ignores_old_and_system_articles() -> None:

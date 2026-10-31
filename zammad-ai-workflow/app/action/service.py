@@ -67,8 +67,7 @@ class ActionService:
                     reason=f"{reason}\n\nNo answer possible. Explanation:\n{response.reasoning}",
                     customer_message=triage.user_text,
                     human_review=(
-                        category == self.settings.triage.no_category_name
-                        or triage.action.type == ActionTypes.NoAction
+                        category == self.settings.triage.no_category_name or triage.action.type == ActionTypes.NoAction
                     ),
                     language=triage.language,
                 )
@@ -295,9 +294,7 @@ class ActionService:
                 ticket_id=ticket_id,
                 state=self.settings.triage.handoff_ticket_state,
             )
-            self.logger.info(
-                f"Set handoff ticket {ticket_id} state to {self.settings.triage.handoff_ticket_state}"
-            )
+            self.logger.info(f"Set handoff ticket {ticket_id} state to {self.settings.triage.handoff_ticket_state}")
 
         public_fallback_text = resolve_localized_text(
             public_fallback,

@@ -35,7 +35,7 @@ def test_ticket_selects_latest_public_customer_article() -> None:
     )
 
     assert ticket.latest_customer_article() is not None
-    assert ticket.latest_customer_article().id == 2  # type: ignore[union-attr]
+    assert ticket.latest_customer_article().id == 2  # type: ignore
 
 
 @pytest.mark.asyncio
@@ -163,6 +163,7 @@ async def test_internal_answer_is_an_explicit_note_without_channel_lookup() -> N
 @pytest.mark.asyncio
 async def test_public_answer_rejects_unsupported_customer_channel() -> None:
     """Public delivery must reject channels unsupported by Zammad replies."""
+
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(
             200,

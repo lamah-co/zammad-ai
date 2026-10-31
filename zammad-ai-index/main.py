@@ -30,7 +30,9 @@ logger: Logger = getLogger("zammad-ai-index")
 
 
 def run_indexing(
-    qdrant_client: QdrantKBClient, zammad_client: ZammadAPIClient | ZammadEAIClient, snapshot_already_created: bool = False
+    qdrant_client: QdrantKBClient,
+    zammad_client: ZammadAPIClient | ZammadEAIClient,
+    snapshot_already_created: bool = False,
 ) -> None:
     """Execute the complete indexing workflow.
 

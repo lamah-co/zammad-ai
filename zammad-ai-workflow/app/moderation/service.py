@@ -76,9 +76,7 @@ class GeminiModerationService:
         """Moderate a customer prompt before support triage."""
         return await self._moderate(text=text, kind="customer_prompt", session_id=session_id)
 
-    async def moderate_response(
-        self, *, prompt: str, response: str, session_id: str | None = None
-    ) -> ModerationResult:
+    async def moderate_response(self, *, prompt: str, response: str, session_id: str | None = None) -> ModerationResult:
         """Moderate a generated response before it can be published."""
         text = f"Customer prompt:\n{prompt}\n\nGenerated response:\n{response}"
         return await self._moderate(text=text, kind="generated_response", session_id=session_id)
@@ -118,11 +116,7 @@ class GeminiModerationService:
                 input={
                     "messages": [
                         HumanMessage(
-                            content=(
-                                f"Moderation kind: {kind}\n"
-                                f"Session id: {session_id or 'none'}\n\n"
-                                f"Text:\n{text}"
-                            )
+                            content=(f"Moderation kind: {kind}\nSession id: {session_id or 'none'}\n\nText:\n{text}")
                         )
                     ]
                 },

@@ -253,7 +253,7 @@ async def test_perform_triage_returns_defaults_when_no_articles(patched_triage: 
 @pytest.mark.asyncio
 async def test_perform_triage_normalizes_moderation_language(patched_triage: TriageService) -> None:
     """Supported BCP-47 language variants should be carried into action execution."""
-    patched_triage.moderation_service = SimpleNamespace(
+    patched_triage.moderation_service = SimpleNamespace(  # type: ignore
         moderate_prompt=AsyncMock(
             return_value=ModerationResult(
                 decision="small_talk",
@@ -288,7 +288,7 @@ async def test_perform_triage_normalizes_moderation_language(patched_triage: Tri
 @pytest.mark.asyncio
 async def test_perform_triage_routes_unsupported_language_to_human_review(patched_triage: TriageService) -> None:
     """Clearly unsupported languages should not continue into automated answer generation."""
-    patched_triage.moderation_service = SimpleNamespace(
+    patched_triage.moderation_service = SimpleNamespace(  # type: ignore
         moderate_prompt=AsyncMock(
             return_value=ModerationResult(
                 decision="safe_support",
@@ -389,7 +389,7 @@ async def test_perform_triage_happy_path(patched_triage: TriageService) -> None:
     """Full triage with a ticket that has an article returns a real category and action."""
     ticket = ZammadTicket(
         id=42,
-        articles=[ZammadArticle(id=1, ticket_id=42, text="My printer is broken")],
+        articles=[ZammadArticle(sender="Customer", id=1, ticket_id=42, text="My printer is broken")],
     )
     cast(FakeZammadClient, patched_triage.zammad_client).ticket = ticket
     patched_triage.genai_handler.categorization_result = CategorizationResult(  # type: ignore
@@ -409,7 +409,7 @@ async def test_perform_triage_in_progress_gauge_returns_to_baseline_on_success(p
     baseline = _get_triage_runs_in_progress_value()
     ticket = ZammadTicket(
         id=42,
-        articles=[ZammadArticle(id=1, ticket_id=42, text="My printer is broken")],
+        articles=[ZammadArticle(sender="Customer", id=1, ticket_id=42, text="My printer is broken")],
     )
     cast(FakeZammadClient, patched_triage.zammad_client).ticket = ticket
     patched_triage.genai_handler.categorization_result = CategorizationResult(  # type: ignore
@@ -440,7 +440,9 @@ async def test_perform_triage_in_progress_gauge_increments_while_running(patched
 
     patched_triage.genai_handler.categorize_ticket = delaying_categorize  # type: ignore
 
-    ticket = ZammadTicket(id=42, articles=[ZammadArticle(id=1, ticket_id=42, text="My printer is broken")])
+    ticket = ZammadTicket(
+        id=42, articles=[ZammadArticle(id=1, ticket_id=42, text="My printer is broken", sender="Customer")]
+    )
     task = asyncio.create_task(patched_triage.perform_triage(ticket=ticket))
     await event.wait()
     # While the categorize call is blocked, the in-progress gauge must have been incremented
@@ -469,7 +471,13 @@ async def test_perform_triage_raises_triage_error_on_zammad_failure(patched_tria
     ticket = ZammadTicket(
         id=99,
         articles=[
-            ZammadArticle(id=1, ticket_id=99, text="Hi", attachments=[ArticleAttachment(id=1, filename="file.pdf")])
+            ZammadArticle(
+                sender="Customer",
+                id=1,
+                ticket_id=99,
+                text="Hi",
+                attachments=[ArticleAttachment(id=1, filename="file.pdf")],
+            )
         ],
     )
     with pytest.raises(TriageError, match="Zammad connection error"):
@@ -574,7 +582,7 @@ async def test_perform_triage_handles_processing_triage_error(patched_triage: Tr
 
     # Ensure there is a ticket with articles so it doesn't return early
     fake_zammad_client = cast(FakeZammadClient, patched_triage.zammad_client)
-    ticket = ZammadTicket(id=123, articles=[ZammadArticle(id=1, ticket_id=123, text="Help me")])
+    ticket = ZammadTicket(id=123, articles=[ZammadArticle(sender="Customer", id=1, ticket_id=123, text="Help me")])
     fake_zammad_client.ticket = ticket
 
     with pytest.raises(TriageError, match="Simulated processing error"):
@@ -733,7 +741,7 @@ def _configure_gemini_moderation_triage(
         async def moderate_prompt(self, _message: str) -> ModerationResult:
             return moderation_result
 
-    triage.moderation_service = _FakeModerationService()  # type: ignore[assignment]
+    triage.moderation_service = _FakeModerationService()  # type: ignore
 
 
 @pytest.mark.asyncio
@@ -759,7 +767,7 @@ async def test_perform_triage_gemini_moderation_routes_arabic_small_talk_before_
     patched_triage.genai_handler.categorize_ticket = _unexpected_categorize  # type: ignore
 
     result = await patched_triage.perform_triage(
-        ticket=ZammadTicket(id=42, articles=[ZammadArticle(id=1, ticket_id=42, text="السلام عليكم")])
+        ticket=ZammadTicket(id=42, articles=[ZammadArticle(sender="Customer", id=1, ticket_id=42, text="السلام عليكم")])
     )
 
     assert result.category.name == "Conversational support"
@@ -790,7 +798,9 @@ async def test_perform_triage_gemini_moderation_routes_out_of_scope_to_static_fa
     patched_triage.genai_handler.categorize_ticket = _unexpected_categorize  # type: ignore
 
     result = await patched_triage.perform_triage(
-        ticket=ZammadTicket(id=42, articles=[ZammadArticle(id=1, ticket_id=42, text="write me a poem")])
+        ticket=ZammadTicket(
+            id=42, articles=[ZammadArticle(sender="Customer", id=1, ticket_id=42, text="write me a poem")]
+        )
     )
 
     assert result.category.name == "Out of scope"
@@ -833,7 +843,9 @@ async def test_perform_triage_gemini_moderation_sends_risky_messages_to_human_re
     patched_triage.genai_handler.categorize_ticket = _unexpected_categorize  # type: ignore
 
     result = await patched_triage.perform_triage(
-        ticket=ZammadTicket(id=42, articles=[ZammadArticle(id=1, ticket_id=42, text="blue triangle tomorrow")])
+        ticket=ZammadTicket(
+            id=42, articles=[ZammadArticle(sender="Customer", id=1, ticket_id=42, text="blue triangle tomorrow")]
+        )
     )
 
     assert result.category == patched_triage.no_category
@@ -863,7 +875,9 @@ async def test_perform_triage_gemini_moderation_allows_support_messages_to_llm(
     )
 
     result = await patched_triage.perform_triage(
-        ticket=ZammadTicket(id=42, articles=[ZammadArticle(id=1, ticket_id=42, text="I need help with my project")])
+        ticket=ZammadTicket(
+            id=42, articles=[ZammadArticle(sender="Customer", id=1, ticket_id=42, text="I need help with my project")]
+        )
     )
 
     assert result.category.name == "General"
@@ -910,10 +924,10 @@ async def test_perform_triage_routes_explicit_human_handoff_from_llm_category(
                 customer_response_type="continue_triage",
             )
 
-    patched_triage.moderation_service = _SafeSupportModerationService()  # type: ignore[assignment]
+    patched_triage.moderation_service = _SafeSupportModerationService()  # type: ignore
 
     result = await patched_triage.perform_triage(
-        ticket=ZammadTicket(id=42, articles=[ZammadArticle(id=1, ticket_id=42, text=message)])
+        ticket=ZammadTicket(id=42, articles=[ZammadArticle(sender="Customer", id=1, ticket_id=42, text=message)])
     )
 
     assert result.category.name == "Human handoff requested"
@@ -945,10 +959,12 @@ async def test_perform_triage_does_not_handoff_without_llm_handoff_category(
                 customer_response_type="continue_triage",
             )
 
-    patched_triage.moderation_service = _SafeSupportModerationService()  # type: ignore[assignment]
+    patched_triage.moderation_service = _SafeSupportModerationService()  # type: ignore
 
     result = await patched_triage.perform_triage(
-        ticket=ZammadTicket(id=42, articles=[ZammadArticle(id=1, ticket_id=42, text="I want to talk to a human")])
+        ticket=ZammadTicket(
+            id=42, articles=[ZammadArticle(sender="Customer", id=1, ticket_id=42, text="I want to talk to a human")]
+        )
     )
 
     assert result.category.name == "General"
