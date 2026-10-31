@@ -232,9 +232,32 @@ localization:
   unsupported_language_action: human_review
 
 # ============================================================================
+# Moderation Configuration
+# ============================================================================
+# moderation:
+#   enabled: true # Run Gemini moderation before triage and on generated answers
+#   provider: gemini
+#   model: gemini-2.5-flash # Optional: falls back to genai.judge_model, then genai.chat_model
+#   block_on_unsafe: true # Turn unsafe generated answers into shared drafts
+#   uncertain_action: human_review
+#   out_of_scope_action_name: out_of_scope_static_response # Must be a configured StaticAnswer action
+
+# ============================================================================
 # Triage Configuration
 # ============================================================================
 triage:
+  # Optional handoff behavior when no answer can be published.
+  # no_answer_public_fallback:
+  #   ar: "تم استلام سؤالك، سنقوم بالرد عليك في أقرب وقت ممكن."
+  #   en: "We received your question and will reply as soon as possible."
+  # no_answer_internal_note: "No answer for {category}: {reason}"
+  # no_answer_tag: ai_no_answer
+  # human_review_public_fallback:
+  #   ar: "تم استلام طلبك، سيتم تحويلك إلى أحد أعضاء الفريق للمتابعة معك في أقرب وقت ممكن."
+  #   en: "Your request has been received. A team member will follow up with you as soon as possible."
+  # human_review_internal_note: "Human review for {category}: {reason}"
+  # human_review_tag: ai_human_review
+  # handoff_ticket_state: open
   # Category setup: Define the categories for ticket classification
   # Each category requires only a unique name.
   categories:

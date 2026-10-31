@@ -23,6 +23,7 @@ export default defineConfig({
         text: "Documentation",
         items: [
           { text: "Configuration Guide", link: "/configuration" },
+          { text: "Native Gemini Agent", link: "/gemini-agent" },
           { text: "REST API Reference", link: "/api" },
         ],
       },
@@ -67,6 +68,14 @@ export default defineConfig({
           {
             text: "Zammad Integration",
             link: "/components/zammad",
+          },
+          {
+            text: "Channel-Aware Replies",
+            link: "/components/channels",
+          },
+          {
+            text: "Moderation and Localization",
+            link: "/components/moderation",
           },
           {
             text: "Qdrant Vector Database",

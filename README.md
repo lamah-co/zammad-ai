@@ -1,5 +1,7 @@
 # Zammad-AI
 
+> This is the `lamah-co` fork of `it-at-m/zammad-ai`. See [FORK.md](FORK.md) for what it adds and how it stays in sync.
+
 [![Made with love by it@M][made-with-love-shield]][itm-opensource]
 
 Zammad-AI is a GenAI-powered extension for Zammad. The repository contains two separate Python services:
