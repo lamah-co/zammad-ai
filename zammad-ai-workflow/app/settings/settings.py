@@ -18,7 +18,7 @@ from .frontend import FrontendSettings
 from .genai import GenAIOpenAISettings, GenAIProviderSettings
 from .guardrails import GuardrailSettings
 from .kafka import KafkaSettings
-from .localization import LocalizationSettings
+from .localization import LocalizationSettings, LocalizedText, static_reply_errors
 from .logging import LoggingSettings
 from .moderation import ModerationSettings
 from .preparser import PreparserSettings
@@ -178,6 +178,21 @@ class ZammadAISettings(BaseSettings):
             self.log.format = "plain" if self.mode == "development" else "json"
         if self.log.level is None:
             self.log.level = "DEBUG" if self.mode == "development" else "INFO"
+        return self
+
+    @model_validator(mode="after")
+    def validate_static_reply_languages(self) -> "ZammadAISettings":
+        """Require every static customer reply to cover all supported languages."""
+        replies: dict[str, LocalizedText | None] = {
+            "triage.no_answer_public_fallback": self.triage.no_answer_public_fallback,
+            "triage.human_review_public_fallback": self.triage.human_review_public_fallback,
+            "triage.public_reply_subject": self.triage.public_reply_subject,
+        }
+        replies |= {f"triage.actions.{action.name}.answer": action.answer for action in self.triage.actions}
+
+        errors = static_reply_errors(replies, self.localization)
+        if errors:
+            raise ValueError("Static replies must cover every supported language:\n- " + "\n- ".join(errors))
         return self
 
     model_config = SettingsConfigDict(

@@ -109,6 +109,7 @@ async def test_out_of_scope_static_fallback_is_published(settings_factory) -> No
         category=Category(name="Out of scope", auto_publish=True),
         action=out_of_scope_action,
         reasoning="Message asks for unrelated content.",
+        language="en",
         confidence=0.85,
         extracted_values=None,
     )

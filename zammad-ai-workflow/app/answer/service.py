@@ -26,6 +26,7 @@ from app.utils.context_builders import build_answer_context, build_judge_context
 from app.utils.genai_provider import get_chat_model
 from app.utils.jinja2 import PromptTemplateRenderer, get_template_renderer
 from app.utils.langchain import extract_structured_response, with_recursion_limit
+from app.utils.localization import reply_language_instruction
 from app.utils.logging import getLogger
 from app.utils.paths import get_prompts_dir
 from app.utils.prompts import load_prompt
@@ -148,6 +149,7 @@ class AnswerService:
         self,
         user_text: str,
         session_id: str | None = None,
+        language: str | None = None,
     ) -> AnswerCandidate:
         """Generate a short support-scoped conversational reply without KB grounding."""
         if session_id is None and self.langfuse_client is not None:
@@ -161,6 +163,7 @@ class AnswerService:
                     "facts or make account-specific promises. Ask the customer to share the service, project, "
                     "or support issue they need help with. Write in the customer's language. Return only the "
                     "customer-facing reply. Use at least 200 characters."
+                    f"{self._language_suffix(language)}"
                 )
             ),
             HumanMessage(content=user_text),
@@ -175,7 +178,8 @@ class AnswerService:
 
         response_text = str(getattr(result, "content", "")).strip()
         if len(response_text) < 200:
-            if _contains_arabic(user_text):
+            reply_in_arabic = language == "ar" if language else _contains_arabic(user_text)
+            if reply_in_arabic:
                 suffix = (
                     "فضلا أرسل تفاصيل الخدمة أو المشروع أو المشكلة التي تحتاج إلى مساعدة بشأنها، "
                     "وسنراجع رسالتك ونوجهك إلى الخطوة المناسبة أو إلى الفريق المختص حسب طبيعة طلبك."
@@ -194,6 +198,7 @@ class AnswerService:
         user_text: str,
         category: str,
         session_id: str | None = None,
+        language: str | None = None,
     ) -> AnswerCandidate | NoAnswerPossible:
         """Generate a structured answer for the given user text and category, optionally associating the request with a provided Langfuse session.
 
@@ -217,6 +222,7 @@ class AnswerService:
                     user_text=user_text,
                     category=category,
                 )
+                + self._language_suffix(language)
             )
             config: RunnableConfig = (
                 self.langfuse_client.build_config(session_id=session_id)
@@ -229,6 +235,7 @@ class AnswerService:
                         user_text=user_text,
                         category=category,
                         config=config,
+                        language=language,
                     )
                 else:
                     if self.agent is None:
@@ -272,6 +279,7 @@ class AnswerService:
         user_text: str,
         category: str,
         config: RunnableConfig,
+        language: str | None = None,
     ) -> dict:
         """Retrieve context explicitly and invoke a model without LangChain tools."""
         documents_with_scores = await self.qdrant_kb_client.asearch_documents(
@@ -294,7 +302,7 @@ class AnswerService:
         direct_message = HumanMessage(
             content=(
                 f"Category: {category}\nCustomer question: {user_text}\n\n"
-                "Retrieved knowledge-base context:\n\n" + "\n\n".join(context_parts)
+                "Retrieved knowledge-base context:\n\n" + "\n\n".join(context_parts) + self._language_suffix(language)
             )
         )
         if self.direct_rag_model is None:
@@ -304,6 +312,11 @@ class AnswerService:
             config=config,
         )
         return {"messages": [response]}
+
+    def _language_suffix(self, language: str | None) -> str:
+        """Return the reply-language instruction to append to a generation prompt."""
+        instruction = reply_language_instruction(language, self.settings.localization)
+        return f"\n\n{instruction}" if instruction else ""
 
     @staticmethod
     def _format_direct_rag_document(index: int, document: Document, score: float) -> str:

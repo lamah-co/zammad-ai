@@ -2,6 +2,18 @@
 
 from app.settings.localization import LocalizationSettings, LocalizedText
 
+REPLY_LANGUAGE_INSTRUCTIONS: dict[str, str] = {
+    "ar": (
+        "Reply language: Arabic. Write the subject and the final answer in clear Modern Standard Arabic. "
+        "If the sources are in another language, translate the facts into Arabic before answering."
+    ),
+    "en": (
+        "Reply language: English. The sources may be in Arabic. Translate the facts into English before providing "
+        "the final answer, and write the subject and the final answer in English only. Keep URLs, numbers, and "
+        "product names unchanged."
+    ),
+}
+
 
 def normalize_supported_language(language: str | None, settings: LocalizationSettings) -> str | None:
     """Normalize a BCP-47 language code to a configured base language."""
@@ -42,6 +54,14 @@ def resolve_localized_text(
             return text
 
     return None
+
+
+def reply_language_instruction(language: str | None, settings: LocalizationSettings) -> str:
+    """Return the generation instruction for the customer's language, or an empty string when unknown."""
+    if language is None:
+        return ""
+    language_code = normalize_supported_language(language, settings) or settings.default_language
+    return REPLY_LANGUAGE_INSTRUCTIONS.get(language_code, "")
 
 
 def is_blank_localized_text(value: LocalizedText | None) -> bool:

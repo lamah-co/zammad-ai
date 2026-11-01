@@ -73,7 +73,8 @@ Defines the business logic for categorization and automation.
 - `actions`: List of available automated actions.
 - `action_rules`: Mapping of categories and conditions to actions.
 - `prompts`: Source of LLM prompt templates (`langfuse`, `file`, or `string`).
-- `no_answer_public_fallback`, `human_review_public_fallback`: Customer acknowledgements for handoffs, as a string or a language map.
+- `no_answer_public_fallback`, `human_review_public_fallback`: Customer acknowledgements for handoffs, as a map covering every supported language.
+- `public_reply_subject`: Subject of static replies and acknowledgements, as a language map.
 - `no_answer_internal_note`, `human_review_internal_note`: Internal note templates with `{category}`, `{action}`, `{customer_message}`, and `{reason}`. `no_action_internal_note` remains the fallback for no-answer handoffs.
 - `no_answer_tag`, `human_review_tag`: Tags added to handoff tickets.
 - `handoff_ticket_state`: Ticket state set on handoff. Leave unset to keep the state.

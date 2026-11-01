@@ -78,7 +78,9 @@ class ActionService:
                     await self.zammad_client.post_answer(
                         ticket_id=ticket_id,
                         text=response.response,
-                        subject=response.subject if isinstance(response, AnswerCandidate) else "Answer",
+                        subject=response.subject
+                        if isinstance(response, AnswerCandidate)
+                        else self._public_subject(triage.language),
                         internal=False,
                     )
                 except UnsupportedReplyChannelError as error:
@@ -108,6 +110,17 @@ class ActionService:
         except Exception as e:
             self.logger.error("Action execution failed.", exc_info=True)
             raise ActionExecutionError("Action execution failed", retryable=True) from e
+
+    def _public_subject(self, language: str | None) -> str:
+        """Return the localized subject for static customer replies."""
+        return (
+            resolve_localized_text(
+                self.settings.triage.public_reply_subject,
+                language=language,
+                settings=self.settings.localization,
+            )
+            or "Answer"
+        )
 
     async def get_answer(
         self,
@@ -169,10 +182,11 @@ class ActionService:
                 response = await self.answer_service.generate_conversational_answer(
                     user_text=user_text,
                     session_id=session_id,
+                    language=language,
                 )
             else:
                 response = await self.answer_service.generate_answer(
-                    user_text=user_text, category=category_name, session_id=session_id
+                    user_text=user_text, category=category_name, session_id=session_id, language=language
                 )
         elif action.type == ActionTypes.StaticAnswer:
             # The settings validator ensures that if the type is StaticAnswer, the answer field is not None, so we can safely access it here
@@ -306,7 +320,7 @@ class ActionService:
             await self.zammad_client.post_answer(
                 ticket_id=ticket_id,
                 text=public_fallback_text,
-                subject="Answer",
+                subject=self._public_subject(language),
                 internal=False,
             )
             self.logger.info(f"Posted handoff acknowledgement for ticket {ticket_id} with category {category}")
