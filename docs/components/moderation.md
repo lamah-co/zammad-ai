@@ -25,7 +25,7 @@ Moderation also detects the customer language. `localization.supported_languages
 - `unsupported_language_action: human_review` hands off a clearly unsupported language.
 - `unsupported_language_action: default_language` continues in `localization.default_language`.
 
-The detected language selects the localized text for static answers and public fallbacks. These settings accept a plain string or a language map:
+The detected language selects the localized text for static answers, public fallbacks and `triage.public_reply_subject`. Each must be a language map covering every supported language; otherwise the service refuses to start:
 
 ```yaml
 triage:
@@ -34,4 +34,4 @@ triage:
     en: "We received your question and will reply as soon as possible."
 ```
 
-Generated answers do not receive the detected language. Their language comes from the answer prompt.
+Generated answers receive the detected language as an explicit instruction. For an English customer, the model translates facts from the knowledge base into English before giving the final answer, and keeps URLs, numbers and product names unchanged. The judge treats language as out of scope, so a correct translation counts as grounded.

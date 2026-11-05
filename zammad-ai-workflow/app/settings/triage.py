@@ -25,7 +25,7 @@ class TriageSettings(BaseModel):
     )
     no_answer_public_fallback: LocalizedText | None = Field(
         default=None,
-        description="Public fallback sent when an AI answer cannot be generated. May be a string or a language map.",
+        description="Public fallback sent when an AI answer cannot be generated, as a map covering every supported language.",
     )
     no_answer_internal_note: str | None = Field(
         default=None,
@@ -37,7 +37,7 @@ class TriageSettings(BaseModel):
     )
     human_review_public_fallback: LocalizedText | None = Field(
         default=None,
-        description="Public acknowledgement sent when the selected outcome requires human review. May be a string or a language map.",
+        description="Public acknowledgement sent when the selected outcome requires human review, as a map covering every supported language.",
     )
     human_review_internal_note: str | None = Field(
         default=None,
@@ -46,6 +46,10 @@ class TriageSettings(BaseModel):
     human_review_tag: str | None = Field(
         default=None,
         description="Tag added when the selected outcome requires human review.",
+    )
+    public_reply_subject: LocalizedText = Field(
+        default_factory=lambda: {"ar": "الرد على طلبك", "en": "Answer"},
+        description="Subject of static customer replies and handoff acknowledgements, per language.",
     )
     handoff_ticket_state: str | None = Field(
         default=None,

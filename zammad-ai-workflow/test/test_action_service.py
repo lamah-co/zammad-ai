@@ -20,6 +20,7 @@ async def test_unsupported_reply_channel_becomes_shared_draft() -> None:
     """Unsupported customer channels must fall back to a shared draft."""
     service = object.__new__(ActionService)
     service.settings = SimpleNamespace(
+        triage=SimpleNamespace(public_reply_subject="Answer"),
         zammad=SimpleNamespace(pending_close_after_days=None),
         localization=LocalizationSettings(),
     )
@@ -115,6 +116,7 @@ async def test_no_answer_possible_creates_agent_handoff_and_customer_acknowledge
         triage=SimpleNamespace(
             no_category_name="Human review required",
             no_action_internal_note=None,
+            public_reply_subject="Answer",
             no_answer_public_fallback="تم استلام سؤالك، سنقوم بالرد عليك في أقرب وقت ممكن.",
             no_answer_internal_note="Category: {category}\nMessage: {customer_message}\nReason: {reason}",
             no_answer_tag="ai_no_answer",
@@ -172,6 +174,7 @@ async def test_human_review_no_action_creates_handoff_acknowledgement() -> None:
         triage=SimpleNamespace(
             no_category_name="Human review required",
             no_action_internal_note=None,
+            public_reply_subject="Answer",
             no_answer_public_fallback=None,
             no_answer_internal_note=None,
             no_answer_tag=None,
@@ -268,6 +271,7 @@ async def test_handoff_public_fallback_uses_detected_english_language() -> None:
         triage=SimpleNamespace(
             no_category_name="Human review required",
             no_action_internal_note=None,
+            public_reply_subject="Answer",
             no_answer_public_fallback=None,
             no_answer_internal_note=None,
             no_answer_tag=None,
