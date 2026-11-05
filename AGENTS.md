@@ -225,3 +225,17 @@ Priority order (highest first):
 - **Pydantic**: Data validation and settings management
 - **truststore**: mTLS certificate handling for secure Kafka connections
 - **pytest + pytest-asyncio**: Async testing framework
+
+## Agent skills
+
+### Issue tracker
+
+Issues live in GitHub Issues on `lamah-co/zammad-ai` (always pass `-R lamah-co/zammad-ai` to `gh`). See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Default vocabulary: `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context: root `GLOSSARY.md` (created lazily) + `docs/adr/`. See `docs/agents/domain.md`.
