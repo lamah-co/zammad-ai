@@ -107,10 +107,7 @@ class ZammadAPIClient(BaseZammadClient):
             return None
 
         try:
-            response = self._request(
-                "GET",
-                f"/api/v1/knowledge_bases/{self.kb_id}/answers/{answer_id}?include_contents={answer_id}",
-            )
+            response = self._request("GET", f"/api/v1/knowledge_bases/{self.kb_id}/answers/{answer_id}")
         except ZammadConnectionError as e:
             cause: BaseException | None = e.__cause__
             if isinstance(cause, HTTPStatusError) and cause.response.status_code == 404:
@@ -120,10 +117,17 @@ class ZammadAPIClient(BaseZammadClient):
             # don't silently treat them as "answer deleted"
             raise
 
+        translation = response["assets"]["KnowledgeBaseAnswerTranslation"][str(answer_id)]
+        content_id = translation["content_id"]
+        response = self._request(
+            "GET",
+            f"/api/v1/knowledge_bases/{self.kb_id}/answers/{answer_id}?include_contents={content_id}",
+        )
+
         return KnowledgeBaseAnswer(
             id=response["id"],
-            answerTitle=response["assets"]["KnowledgeBaseAnswerTranslation"][str(answer_id)]["title"],
-            answerBody=response["assets"]["KnowledgeBaseAnswerTranslationContent"][str(answer_id)]["body"],
+            answerTitle=translation["title"],
+            answerBody=response["assets"]["KnowledgeBaseAnswerTranslationContent"][str(content_id)]["body"],
             attachments=[
                 KnowledgeBaseAttachment(
                     id=attachment["id"],

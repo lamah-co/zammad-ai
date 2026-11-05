@@ -19,6 +19,8 @@ from app.settings import (
     GenAIOpenAISettings,
     GuardrailSettings,
     KafkaSettings,
+    LocalizationSettings,
+    ModerationSettings,
     PreparserSettings,
     TriageSettings,
     ZammadAISettings,
@@ -144,6 +146,8 @@ def base_settings() -> ZammadAISettings:
         guardrails=GuardrailSettings(
             enabled=False
         ),  # Disable guardrails by default for tests; individual tests can enable with settings_factory overrides
+        moderation=ModerationSettings(enabled=False),
+        localization=LocalizationSettings(),
         preparser=PreparserSettings(enabled=False),
         answer=AnswerSettings(
             ai_answer_disclaimer="",
@@ -230,6 +234,16 @@ def cleanup_triage_singleton() -> Generator[None, None, None]:
     triage_module._service = None
     yield
     triage_module._service = None
+
+
+@pytest.fixture(autouse=True)
+def cleanup_moderation_singleton() -> Generator[None, None, None]:
+    """Reset the shared moderation singleton around each test."""
+    import app.moderation.service as moderation_module
+
+    moderation_module._service = None
+    yield
+    moderation_module._service = None
 
 
 @pytest.fixture(autouse=True)
@@ -417,16 +431,30 @@ def test_client(
     """
     import importlib
 
-    settings = settings_factory()
+    base = settings_factory()
+    # API tests run without a broker, so the backend must start in REST-only mode.
+    settings = settings_factory(kafka=base.kafka.model_copy(update={"silent_fallback": True}))
     triage_stub = _ApiTriageStub()
 
     monkeypatch.setattr("app.settings.settings.get_settings", lambda: settings)
     monkeypatch.setattr("app.settings.get_settings", lambda: settings)
+    import sys
 
-    import app.api.backend as backend_module
+    from prometheus_client import REGISTRY
 
-    backend_module = importlib.reload(backend_module)  # type: ignore
+    if "app.api.backend" in sys.modules:
+        previous = sys.modules["app.api.backend"]
+        # Reloading re-creates the module-level metrics, so drop the previous ones first.
+        for metric in (previous.HTTP_REQUESTS_TOTAL, previous.HTTP_REQUEST_DURATION_SECONDS):
+            REGISTRY.unregister(metric)
+        backend_module = importlib.reload(previous)
+    else:
+        backend_module = importlib.import_module("app.api.backend")
     monkeypatch.setattr(backend_module, "get_triage_service", lambda settings=None: triage_stub)
+    # The real services call providers and Qdrant during startup; API tests must stay offline.
+    monkeypatch.setattr(backend_module, "get_answer_service", lambda settings=None: triage_stub)
+    monkeypatch.setattr(backend_module, "get_action_service", lambda settings=None, answer_service=None: triage_stub)
+    monkeypatch.setattr(backend_module, "get_preparser_service", lambda settings=None: None)
 
     with TestClient(backend_module.backend) as client:
         yield client

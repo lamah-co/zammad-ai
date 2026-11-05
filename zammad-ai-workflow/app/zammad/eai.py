@@ -133,10 +133,29 @@ class ZammadEAIClient(BaseZammadClient):
         logger.info(f"Updated ticket {ticket_id} to pending close after {days} days")
 
     @override
-    async def post_answer(self, ticket_id: int, text: str, subject: str | None = None, internal: bool = False) -> None:
-        payload = ZammadAnswer(ticket_id=ticket_id, body=text, internal=internal, subject=subject)
-        await self._request("POST", f"/tickets/{ticket_id}/articles", json=payload.model_dump())
+    async def set_ticket_state(self, ticket_id: int, state: str) -> None:
+        payload = {"id": ticket_id, "state": state}
+        await self._request("PATCH", f"/tickets/{ticket_id}", json=payload)
+        logger.info(f"Updated ticket {ticket_id} state to {state}")
+
+    @override
+    async def post_answer(
+        self, ticket_id: int, text: str, subject: str | None = None, internal: bool = False
+    ) -> int | None:
+        payload = ZammadAnswer(
+            ticket_id=ticket_id,
+            body=text,
+            internal=internal,
+            subject=subject,
+            type="note",
+        )
+        response = await self._request(
+            "POST",
+            f"/tickets/{ticket_id}/articles",
+            json=payload.model_dump(by_alias=True, exclude_none=True),
+        )
         logger.info(f"Posted answer to ticket {ticket_id}")
+        return response.get("id") if isinstance(response, dict) and isinstance(response.get("id"), int) else None
 
     @override
     async def post_shared_draft(self, ticket_id: int, text: str) -> None:

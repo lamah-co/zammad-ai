@@ -25,7 +25,8 @@ Identifies the specific deployment or purpose of the service.
 
 Configures the interface to the Large Language Model.
 
-- `sdk`: Currently supports `openai`.
+- `sdk`: Supports `openai`, `gemini`, and `anthropic` in the workflow. The
+  index job supports `openai` and `gemini` embeddings.
 - `chat_model`: The model used for generating responses (e.g., `gpt-4o`).
 - `embedding_model`: The model used for vector search.
 - `temperature`: Creativity setting (0.0 recommended for consistent results).
@@ -72,6 +73,38 @@ Defines the business logic for categorization and automation.
 - `actions`: List of available automated actions.
 - `action_rules`: Mapping of categories and conditions to actions.
 - `prompts`: Source of LLM prompt templates (`langfuse`, `file`, or `string`).
+- `no_answer_public_fallback`, `human_review_public_fallback`: Customer acknowledgements for handoffs, as a string or a language map.
+- `no_answer_internal_note`, `human_review_internal_note`: Internal note templates with `{category}`, `{action}`, `{customer_message}`, and `{reason}`. `no_action_internal_note` remains the fallback for no-answer handoffs.
+- `no_answer_tag`, `human_review_tag`: Tags added to handoff tickets.
+- `handoff_ticket_state`: Ticket state set on handoff. Leave unset to keep the state.
+
+See [Channel-Aware Replies](components/channels.md) for publish gates and handoff behavior.
+
+### Answer
+
+- `strategy`: `agent` for tool calling, or `direct_rag` for one completion after Qdrant retrieval. `direct_rag` does not support `answer.dlf`.
+- `direct_rag_prompt`: System prompt for the `direct_rag` strategy.
+
+### Moderation
+
+- `enabled`: Run Gemini moderation before triage and on generated answers.
+- `provider`, `model`: Moderation provider and model. `model` falls back to `genai.judge_model`, then `genai.chat_model`.
+- `block_on_unsafe`: Turn unsafe generated answers into shared drafts.
+- `uncertain_action`: Route for uncertain results.
+- `small_talk_category_name`: Category used for small talk.
+- `out_of_scope_category_name`, `out_of_scope_action_name`: Category and `StaticAnswer` action used for out-of-scope messages.
+
+See [Moderation and Localization](components/moderation.md).
+
+### Localization
+
+- `default_language`: Language used when none can be detected.
+- `supported_languages`: Languages handled automatically (`ar`, `en`).
+- `unsupported_language_action`: `human_review` or `default_language`.
+
+### API
+
+- `api_key`: Bearer key required by `/api/v1/triage` and `/api/v1/answer`. Requests are not authenticated when it is unset, so set `ZAMMAD_AI_API__API_KEY` in production. `/api/v1/health` stays open for container probes.
 
 ## Secrets Management
 
@@ -80,6 +113,9 @@ Sensitive information must NOT be placed in `config.yaml`. Use context-specific 
 ```env
 # OpenAI
 OPENAI_API_KEY=sk-...
+
+# Gemini Developer API (when genai.sdk is gemini)
+GOOGLE_API_KEY=...
 
 # Zammad
 ZAMMAD_AI_ZAMMAD__AUTH_TOKEN=...
@@ -93,3 +129,12 @@ LANGFUSE_PUBLIC_KEY=...
 LANGFUSE_SECRET_KEY=...
 LANGFUSE_HOST=...
 ```
+
+## Native Gemini Agent
+
+Use `genai.sdk: gemini` when running Gemini models. The native adapter preserves
+Gemini message metadata across LangChain tool calls. `sdk: openai` is reserved
+for OpenAI models and rejects Gemini model IDs.
+
+See [Gemini agent configuration](gemini-agent.md) for complete workflow/index
+examples, migration, and contract tests.

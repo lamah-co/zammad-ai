@@ -16,6 +16,7 @@ from qdrant_client.models import FieldCondition, Filter, MatchValue
 from app.errors import QdrantPermanentError, QdrantRetryableError
 from app.settings import QdrantSettings
 from app.settings.genai import GenAIProviderSettings
+from app.utils.genai_provider import get_embedding_model
 from app.utils.logging import getLogger
 
 logger: Logger = getLogger("zammad-ai.answer.knowledgebase")
@@ -115,18 +116,11 @@ class QdrantKBClient:
         # Create LangChain embedding model
         self.embeddings: Embeddings
 
-        match genai_settings.sdk:
-            case "openai" | "anthropic":
-                from langchain_openai import OpenAIEmbeddings
-
-                self.embeddings = OpenAIEmbeddings(
-                    model=genai_settings.embedding_model,
-                    dimensions=qdrant_settings.vector_dimension,
-                    max_retries=genai_settings.max_retries,
-                )
-            case _:
-                self.logger.error(f"Unsupported GenAI SDK '{genai_settings.sdk}' for embeddings")
-                raise QdrantKBError(f"Unsupported GenAI SDK '{genai_settings.sdk}' for embeddings")
+        try:
+            self.embeddings = get_embedding_model(genai_settings, qdrant_settings.vector_dimension)
+        except (ImportError, ValueError) as error:
+            self.logger.error(f"Unsupported GenAI SDK '{genai_settings.sdk}' for embeddings")
+            raise QdrantKBError(f"Unsupported GenAI SDK '{genai_settings.sdk}' for embeddings") from error
 
         # Test embedding to ensure configuration is correct
         test_result: list[float] = self.embeddings.embed_query("This is a test string")

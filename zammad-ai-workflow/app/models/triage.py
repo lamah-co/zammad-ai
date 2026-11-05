@@ -41,6 +41,10 @@ class TriageResult(BaseModel):
     action: Action = Field(description="The recommended action")
     reasoning: str = Field(description="Explanation for the categorization")
     confidence: float = Field(description="Confidence score (0.0 to 1.0)")
+    language: str | None = Field(
+        default=None,
+        description="Normalized customer language used for localized customer-facing responses.",
+    )
     extracted_values: dict[str, str | int | float | bool] | None = Field(
         default=None, description="Any extracted values as specified by the category definition"
     )

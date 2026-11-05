@@ -1,5 +1,7 @@
 """Models for Zammad knowledge base, tickets, and answer payloads."""
 
+from datetime import datetime
+
 from markdownify import markdownify
 from pydantic import AliasChoices, BaseModel, Field, field_validator
 
@@ -18,6 +20,17 @@ class ZammadTicket(BaseModel):
         description="List of articles associated with the ticket",
         default_factory=list,
     )
+
+    def latest_customer_article(self) -> "ZammadArticle | None":
+        """Return the newest public customer article, or None when unavailable."""
+        customer_articles = [
+            article
+            for article in self.articles
+            if not article.internal and (article.sender or "").casefold() == "customer"
+        ]
+        if not customer_articles:
+            return None
+        return max(customer_articles, key=lambda article: (article.created_at or datetime.min, article.id))
 
 
 class ArticleAttachment(BaseModel):
@@ -52,12 +65,42 @@ class ZammadArticle(BaseModel):
         description="Whether the article is internal",
         default=False,
     )
+    created_at: datetime | None = Field(
+        description="Article creation timestamp",
+        default=None,
+    )
     author: str = Field(
         description="Author of the article",
         default="-",
     )
     subject: str | None = Field(
         description="Subject of the article",
+        default=None,
+    )
+    type: str | None = Field(
+        description="Zammad article type, which identifies the communication channel",
+        default=None,
+    )
+    sender: str | None = Field(
+        description="Zammad sender role, for example Customer or Agent",
+        default=None,
+    )
+    from_: str | None = Field(
+        description="Sender address from the communication article",
+        default=None,
+        validation_alias=AliasChoices("from", "from_"),
+        serialization_alias="from",
+    )
+    to: str | None = Field(
+        description="Recipient address from the communication article",
+        default=None,
+    )
+    cc: str | None = Field(
+        description="Optional copied recipients from the communication article",
+        default=None,
+    )
+    message_id: str | None = Field(
+        description="Message ID used for communication threading",
         default=None,
     )
 
@@ -83,6 +126,18 @@ class ZammadAnswer(BaseModel):
     )
     subject: str | None = Field(default=None, description="Optional subject line for the answer")
     content_type: str = "text/html"
+    type: str = Field(description="Zammad article type used for delivery")
+    sender: str = Field(default="Agent", description="Zammad sender role")
+    from_: str | None = Field(
+        description="Outbound sender address",
+        default=None,
+        validation_alias=AliasChoices("from", "from_"),
+        serialization_alias="from",
+    )
+    to: str | None = Field(description="Outbound recipient address", default=None)
+    in_reply_to: str | None = Field(description="Message ID to reply to", default=None)
+
+    model_config = {"populate_by_name": True}
 
 
 class ZammadTagAdd(BaseModel):

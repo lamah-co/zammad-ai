@@ -41,6 +41,7 @@ class Paragraph(BaseModel):
     Keep fields small: full text and any references. Also preserve paragraph
     identifier and title for metadata convenience.
     """
+
     paragraph: str
     title: str = ""
     full: str
@@ -79,6 +80,7 @@ class Annex(BaseModel):
 
     Contains the full annex text and the list of references it mentions.
     """
+
     annex: str
     title: str = ""
     full: str
@@ -112,7 +114,9 @@ def _extract_annexes_from_markdown(markdown_text: str) -> list[Annex]:
     return annexes
 
 
-def _chunk_paragraphs(paragraphs: list[Paragraph], chunk_size: PositiveInt, chunk_overlap: PositiveInt) -> list[Document]:
+def _chunk_paragraphs(
+    paragraphs: list[Paragraph], chunk_size: PositiveInt, chunk_overlap: PositiveInt
+) -> list[Document]:
     """Split full paragraph text into smaller chunks for better retrieval."""
     splitter = RecursiveCharacterTextSplitter(
         chunk_size=chunk_size,

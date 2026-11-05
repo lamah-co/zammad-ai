@@ -36,7 +36,7 @@ The indexing run follows a fixed, fault-tolerant workflow:
 - uv as dependency and execution tool
 - reachable Qdrant server
 - valid Zammad credentials
- - OpenAI env vars for embeddings
+- OpenAI or Gemini credentials for embeddings
 
 ## Setup
 
@@ -75,6 +75,9 @@ Typical environment variables (.env):
 OPENAI_API_KEY=...
 # Optional for custom endpoint/proxy
 # OPENAI_BASE_URL=...
+
+# Native Gemini alternative (set genai.sdk: gemini)
+# GOOGLE_API_KEY=...
 
 # Qdrant
 ZAMMAD_AI_QDRANT__API_KEY=...
@@ -132,7 +135,7 @@ Settings source priority (highest first):
 Key sections (see `config.example.yaml` for a full example):
 
 - `index`: `full_indexing`, `interval`, `batch_size`
-- `genai`: `sdk`, `chat_model`, `embedding_model`, `max_retries`
+- `genai`: `sdk` (`openai` or `gemini`), `chat_model`, `embedding_model`, `max_retries`
 - `qdrant`: `url`, `api_key`, `collection_name`, `vector_name`, `vector_dimension`, `timeout`, `retrieval_num_documents`
 - `zammad`: `type` (`api` or `eai`), `base_url`, `knowledge_base_id`, auth fields, optional RSS feed token/locale, and `document_parsing` (`mode`, `url`, `http_proxy_url`, `document_types`)
 - `laws` (optional): list of law sources with `id`, `name`, `url`, `chunk_size`, `chunk_overlap`

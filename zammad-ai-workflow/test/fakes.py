@@ -230,6 +230,14 @@ class FakeZammadClient:
         """
         raise AssertionError("add_tag_to_ticket should not be called in these tests")
 
+    async def set_ticket_state(self, ticket_id: str, state: str) -> None:
+        """Prevent accidental state updates in tests by failing immediately.
+
+        Raises:
+            AssertionError: Always raised to indicate this fake client must not be asked to change ticket state during tests.
+        """
+        raise AssertionError("set_ticket_state should not be called in these tests")
+
     async def cleanup(self) -> None:
         """Perform cleanup for the fake client.
 
