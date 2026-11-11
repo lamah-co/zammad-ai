@@ -2,7 +2,7 @@
 
 from typing import Literal
 
-from pydantic import BaseModel, Field, FilePath
+from pydantic import BaseModel, Field, FilePath, NonNegativeFloat, PositiveInt
 
 
 class KafkaSettings(BaseModel):
@@ -41,6 +41,27 @@ class KafkaSettings(BaseModel):
     event_processing: "EventProcessingSettings" = Field(
         description="Settings related to processing of incoming events.",
         default_factory=lambda: EventProcessingSettings(),
+    )
+    retry: "KafkaRetrySettings" = Field(
+        description="Retry budget for events that fail with a retryable error.",
+        default_factory=lambda: KafkaRetrySettings(),
+    )
+
+
+class KafkaRetrySettings(BaseModel):
+    """Retry budget and backoff for retryable event processing errors."""
+
+    max_attempts: PositiveInt = Field(
+        default=5,
+        description="Attempts per event, including the first. When used up, the ticket is handed off to a human.",
+    )
+    initial_backoff_seconds: NonNegativeFloat = Field(
+        default=2.0,
+        description="Wait before the first retry. Each further retry doubles the wait.",
+    )
+    max_backoff_seconds: NonNegativeFloat = Field(
+        default=60.0,
+        description="Upper bound for one wait, also used while a hand-off cannot be written to Zammad.",
     )
 
 

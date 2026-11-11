@@ -64,6 +64,17 @@ def reply_language_instruction(language: str | None, settings: LocalizationSetti
     return REPLY_LANGUAGE_INSTRUCTIONS.get(language_code, "")
 
 
+def guess_language(text: str, settings: LocalizationSettings) -> str:
+    """Guess the customer language from the script of the text, for when moderation never ran."""
+    if any("\u0600" <= char <= "\u06ff" for char in text):
+        language = "ar"
+    elif text.strip():
+        language = "en"
+    else:
+        return settings.default_language
+    return language if language in settings.supported_languages else settings.default_language
+
+
 def is_blank_localized_text(value: LocalizedText | None) -> bool:
     """Return true when a plain or localized text setting has no usable text."""
     if value is None:

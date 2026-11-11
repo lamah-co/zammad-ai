@@ -60,6 +60,10 @@ Event streaming configuration.
 - `topic`: Topic to listen for new ticket events.
 - `group_id`: Consumer group identifier.
 - `security`: mTLS security settings (optional).
+- `retry.max_attempts`: Attempts per event, including the first (default 5). When they are used up, the ticket is handed off.
+- `retry.initial_backoff_seconds`, `retry.max_backoff_seconds`: Wait before each retry, doubling from the initial value up to the maximum (defaults 2 and 60).
+
+Billing and credential errors from the GenAI provider skip retries and hand off at once, because only a person can fix them. When the hand-off itself cannot be written to Zammad, the event stays in Kafka and is retried after `retry.max_backoff_seconds`.
 
 ### Limits
 
@@ -78,6 +82,7 @@ Defines the business logic for categorization and automation.
 - `no_answer_internal_note`, `human_review_internal_note`: Internal note templates with `{category}`, `{action}`, `{customer_message}`, and `{reason}`. `no_action_internal_note` remains the fallback for no-answer handoffs.
 - `no_answer_tag`, `human_review_tag`: Tags added to handoff tickets.
 - `handoff_ticket_state`: Ticket state set on handoff. Leave unset to keep the state.
+- `failed_internal_note`, `failed_tag`: Internal note and tag for tickets handed off because processing failed (default tag `ai_failed`). The customer receives `human_review_public_fallback`.
 
 See [Channel-Aware Replies](components/channels.md) for publish gates and handoff behavior.
 

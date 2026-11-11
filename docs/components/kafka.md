@@ -26,6 +26,16 @@ The service does not automatically process every event received from Kafka. It u
 - **Config Key**: `kafka.event_processing.valid_request_types` (list of strings)
 - **Logic**: If the `request_type` of an incoming event is not in this list, the event is acknowledged and ignored. This prevents the service from responding to tickets it is not configured to handle.
 
+## Retries and Hand-off
+
+A failing event is retried inside the consumer, up to `kafka.retry.max_attempts` times, waiting 2, 4, 8 … seconds between attempts. It is not redelivered by Kafka.
+
+- **Budget used up:** the ticket is handed to a person with an internal note, the `ai_failed` tag and the localized acknowledgement, and the event is acknowledged.
+- **Billing or credential errors** (for example a `402` for depleted prepaid credits): hand off on the first failure, since retrying cannot help.
+- **Zammad cannot take the hand-off:** the event is not acknowledged. Kafka redelivers it after `kafka.retry.max_backoff_seconds`, so nothing is dropped and nothing is hammered.
+
+The metrics `zammad_ai_event_retries_total` and `zammad_ai_event_handoffs_total`, labelled by error class, show both paths.
+
 ## Kafka Configuration & Security
 
 Kafka settings are nested under the `kafka` key in `config.yaml` and support environment variable overrides using the prefix `ZAMMAD_AI_KAFKA__`. Security settings are further nested under `security`.

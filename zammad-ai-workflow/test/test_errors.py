@@ -5,6 +5,7 @@ import pytest
 from app.errors import (
     AckDecision,
     GenAIAuthError,
+    GenAIContentFilterError,
     GenAIProtocolError,
     GenAIQuotaError,
     TriageCategoryWrongError,
@@ -26,10 +27,20 @@ def test_classify_exception_retryable_typed_error() -> None:
 def test_classify_exception_permanent_typed_error() -> None:
     """Permanent typed errors should map to ACK drop."""
     decision = classify_exception(
-        GenAIAuthError("auth failed"),
+        GenAIContentFilterError("content filtered"),
         category_wrong_retry_confidence_threshold=0.5,
     )
     assert decision.decision == AckDecision.ACK_DROP
+    assert decision.error_class == "GenAIContentFilterError"
+
+
+def test_classify_exception_auth_error_needs_a_person() -> None:
+    """Credential errors cannot be fixed by retrying or dropping, so the ticket is handed off."""
+    decision = classify_exception(
+        GenAIAuthError("auth failed"),
+        category_wrong_retry_confidence_threshold=0.5,
+    )
+    assert decision.decision == AckDecision.HANDOFF
     assert decision.error_class == "GenAIAuthError"
 
 

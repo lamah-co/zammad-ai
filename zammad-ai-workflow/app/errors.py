@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from enum import Enum
 
@@ -19,6 +20,8 @@ class AppError(Exception):
     """Base application exception with retryability metadata for broker policy."""
 
     retryable: bool = False
+    # Errors only a person can resolve, such as billing or credentials, skip retries and hand off.
+    handoff_on_failure: bool = False
 
     def __init__(self, message: str, *, retryable: bool | None = None) -> None:
         """Initialize an application error with optional retryability override."""
@@ -119,6 +122,14 @@ class GenAIAuthError(GenAIError):
     """GenAI authentication/authorization issue."""
 
     retryable = False
+    handoff_on_failure = True
+
+
+class GenAIBillingError(GenAIError):
+    """GenAI account has no usable billing balance, such as depleted prepaid credits."""
+
+    retryable = False
+    handoff_on_failure = True
 
 
 class GenAIContentFilterError(GenAIError):
@@ -171,6 +182,19 @@ class AckDecision(Enum):
 
     ACK_DROP = "ack_drop"
     NACK_RETRY = "nack_retry"
+    HANDOFF = "handoff"
+
+
+def _find_handoff_error(error: BaseException) -> AppError | None:
+    """Return the first error in the cause chain that needs a person to resolve it."""
+    seen: set[int] = set()
+    current: BaseException | None = error
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        if isinstance(current, AppError) and current.handoff_on_failure:
+            return current
+        current = current.__cause__ or current.__context__
+    return None
 
 
 def classify_exception(
@@ -180,6 +204,13 @@ def classify_exception(
 ) -> ExceptionDecision:
     """Classify an exception into broker ACK/NACK behavior."""
     error_class = type(error).__name__
+
+    if (handoff_error := _find_handoff_error(error)) is not None:
+        return ExceptionDecision(
+            decision=AckDecision.HANDOFF,
+            reason="requires_human_action",
+            error_class=type(handoff_error).__name__,
+        )
 
     if isinstance(error, TriageCategoryWrongError):
         retry = error.confidence < category_wrong_retry_confidence_threshold
@@ -220,6 +251,11 @@ def classify_provider_error(error: Exception) -> GenAIError:
         return GenAIProtocolError("GenAI tool-call protocol is invalid")
     if "timeout" in error_name or "timeout" in message:
         return GenAITimeoutError("GenAI request timed out")
+
+    if re.search(r"\b402\b", message) or any(
+        token in message for token in ("prepayment", "credits are depleted", "billing")
+    ):
+        return GenAIBillingError("GenAI account has no usable billing balance")
 
     if any(token in error_name for token in ("ratelimit", "quota")) or any(
         token in message for token in ("ratelimit", "quota")
