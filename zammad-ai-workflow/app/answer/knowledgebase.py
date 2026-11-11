@@ -1,5 +1,6 @@
 """Qdrant knowledge-base client and retrieval helpers."""
 
+import asyncio
 from logging import Logger
 from uuid import NAMESPACE_DNS, UUID, uuid5
 
@@ -13,11 +14,12 @@ from qdrant_client.http.exceptions import ApiException
 from qdrant_client.http.models import CollectionInfo
 from qdrant_client.models import FieldCondition, Filter, MatchValue
 
-from app.errors import QdrantPermanentError, QdrantRetryableError
+from app.errors import QdrantPermanentError, QdrantRetryableError, classify_provider_error
 from app.settings import QdrantSettings
 from app.settings.genai import GenAIProviderSettings
 from app.utils.genai_provider import get_embedding_model
 from app.utils.logging import getLogger
+from app.utils.status import provider_status, set_provider_ready
 
 logger: Logger = getLogger("zammad-ai.answer.knowledgebase")
 
@@ -122,28 +124,54 @@ class QdrantKBClient:
             self.logger.error(f"Unsupported GenAI SDK '{genai_settings.sdk}' for embeddings")
             raise QdrantKBError(f"Unsupported GenAI SDK '{genai_settings.sdk}' for embeddings") from error
 
-        # Test embedding to ensure configuration is correct
-        test_result: list[float] = self.embeddings.embed_query("This is a test string")
-        if len(test_result) != qdrant_settings.vector_dimension:
-            self.logger.error(
-                f"Embedding dimension mismatch: expected {qdrant_settings.vector_dimension}, got {len(test_result)}. Check your GenAI embedding model configuration."
-            )
-            raise QdrantKBError(
-                f"Embedding dimension mismatch: expected {qdrant_settings.vector_dimension}, got {len(test_result)}. Check your GenAI embedding model configuration."
-            )
+        # Test embedding to ensure configuration is correct. A provider outage must not abort startup.
+        provider_ready: bool = self.verify_embeddings()
 
-        # Create LangChain Qdrant vector store
+        # Create LangChain Qdrant vector store. Its collection check embeds a test text,
+        # so it only runs when the provider answered.
         self.vectorstore = QdrantVectorStore(
             client=self.client,
             collection_name=qdrant_settings.collection_name,
             embedding=self.embeddings,
             vector_name=qdrant_settings.vector_name,
+            validate_collection_config=provider_ready,
         )
 
         self.retriever: VectorStoreRetriever = self.vectorstore.as_retriever(
             search_type="similarity",
             search_kwargs={"k": qdrant_settings.retrieval_num_documents},
         )
+
+    def verify_embeddings(self) -> bool:
+        """Check that the embedding provider answers with the configured vector dimension.
+
+        Returns:
+            bool: True when the provider answered, False when it is unavailable.
+
+        Raises:
+            QdrantKBError: If the provider answers with a different vector dimension, which is a configuration error.
+        """
+        expected: int = self.qdrant_settings.vector_dimension
+        try:
+            test_result: list[float] = self.embeddings.embed_query("This is a test string")
+        except Exception as e:
+            reason: str = type(classify_provider_error(e)).__name__
+            self.logger.error(
+                f"Embedding provider is unavailable ({reason}); starting without it and retrying in the background.",
+                exc_info=True,
+            )
+            set_provider_ready(False, reason)
+            return False
+
+        if len(test_result) != expected:
+            self.logger.error(
+                f"Embedding dimension mismatch: expected {expected}, got {len(test_result)}. Check your GenAI embedding model configuration."
+            )
+            raise QdrantKBError(
+                f"Embedding dimension mismatch: expected {expected}, got {len(test_result)}. Check your GenAI embedding model configuration."
+            )
+        set_provider_ready(True)
+        return True
 
     async def asearch_documents(
         self,
@@ -224,3 +252,21 @@ class QdrantKBClient:
         """Close the Qdrant client connections."""
         await self.aclient.close()
         self.client.close()
+
+
+PROVIDER_RETRY_INITIAL_SECONDS = 5.0
+PROVIDER_RETRY_MAX_SECONDS = 60.0
+
+
+async def watch_provider(qdrant_kb_client: QdrantKBClient) -> None:
+    """Re-check the embedding provider with backoff until it answers, then mark it ready."""
+    delay: float = PROVIDER_RETRY_INITIAL_SECONDS
+    while not provider_status()[0]:
+        await asyncio.sleep(delay)
+        try:
+            if await asyncio.to_thread(qdrant_kb_client.verify_embeddings):
+                logger.info("Embedding provider is available again.")
+                return
+        except Exception:
+            logger.error("Embedding provider check failed.", exc_info=True)
+        delay = min(delay * 2, PROVIDER_RETRY_MAX_SECONDS)

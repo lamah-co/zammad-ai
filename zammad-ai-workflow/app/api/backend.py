@@ -1,5 +1,6 @@
 """FastAPI backend wiring for Zammad AI services and routes."""
 
+import asyncio
 from asyncio import CancelledError
 from collections.abc import AsyncGenerator, Awaitable, Callable
 from contextlib import asynccontextmanager
@@ -15,13 +16,14 @@ from starlette.responses import Response
 
 from app.action.service import get_action_service
 from app.answer import get_answer_service
+from app.answer.knowledgebase import watch_provider
 from app.frontend import mount_frontend
 from app.models.api_v1 import HealthCheckResponse
 from app.preparser.service import get_preparser_service
 from app.settings import ZammadAISettings, get_settings
 from app.triage import get_triage_service
 from app.utils.logging import getLogger
-from app.utils.status import set_status, track_activity
+from app.utils.status import provider_status, set_status, track_activity
 
 from .v1.answer import answer_router
 from .v1.triage import triage_router
@@ -114,7 +116,15 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         if kafka_router is None:
             set_status("ready")
 
+        provider_watch: asyncio.Task[None] | None = None
+        qdrant_kb_client = getattr(app.state.answer_service, "qdrant_kb_client", None)
+        if qdrant_kb_client is not None and not provider_status()[0]:
+            provider_watch = asyncio.create_task(watch_provider(qdrant_kb_client))
+
         yield
+
+        if provider_watch is not None:
+            provider_watch.cancel()
 
         logger.info("Shutting down shared Triage, Answer and Action services")
         set_status("shutdown")
@@ -239,12 +249,16 @@ async def get_prompt_versions() -> dict[str, int | None]:
 
 
 @backend.get("/api/v1/health", tags=["health"])
-async def health_check() -> HealthCheckResponse:
-    """Provide a basic application health check response.
+async def health_check(response: Response) -> HealthCheckResponse:
+    """Report health, with 503 while the GenAI provider is unavailable.
 
     Returns:
-        HealthCheckResponse: An instance containing the application's default health status.
+        HealthCheckResponse: `healthy`, or `degraded` with the provider error class.
     """
+    ready, reason = provider_status()
+    if not ready:
+        response.status_code = 503
+        return HealthCheckResponse(status="degraded", reason=reason)
     return HealthCheckResponse()
 
 

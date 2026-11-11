@@ -45,6 +45,10 @@ class HealthCheckResponse(BaseModel):
     """Health check response returned by the backend."""
 
     status: str = Field(
-        description="Health status of the API. Expected value is 'healthy' when the API is operational.",
+        description="'healthy' when operational, 'degraded' while the GenAI provider is unavailable.",
         default="healthy",
+    )
+    reason: str | None = Field(
+        description="Error class of the unavailable provider, when degraded.",
+        default=None,
     )
