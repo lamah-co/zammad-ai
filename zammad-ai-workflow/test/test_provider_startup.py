@@ -116,3 +116,12 @@ def test_health_reports_degraded_while_the_provider_is_unavailable(test_client: 
     assert degraded.json() == {"status": "degraded", "reason": "GenAIBillingError"}
     assert healthy.status_code == 200
     assert healthy.json()["status"] == "healthy"
+
+
+def test_invalid_gemini_key_is_a_credential_error() -> None:
+    """Gemini's invalid-key response hands off at once instead of using up the retry budget."""
+    from app.errors import GenAIAuthError, classify_provider_error
+
+    error = Exception("400 INVALID_ARGUMENT. API key not valid. Please pass a valid API key. reason: API_KEY_INVALID")
+
+    assert isinstance(classify_provider_error(error), GenAIAuthError)
