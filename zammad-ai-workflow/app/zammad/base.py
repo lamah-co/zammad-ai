@@ -109,6 +109,24 @@ class BaseZammadClient(ABC):
         """
         ...
 
+    async def get_ticket_with_context(self, id: int) -> ZammadTicket:
+        """Return the ticket with its owner, tags and answered-through marker. Clients without them return articles only.
+
+        Args:
+            id: Zammad ticket identifier.
+
+        """
+        return await self.get_ticket(id)
+
+    async def get_own_user_id(self) -> int:
+        """Return the ID of the user this client acts as.
+
+        Raises:
+            NotImplementedError: If the client cannot identify its own user.
+
+        """
+        raise NotImplementedError("This Zammad client cannot identify its own user")
+
     async def get_ticket_tags(self, ticket_id: int) -> list[str]:
         """Return the tags of a ticket. Clients that cannot read tags return an empty list.
 

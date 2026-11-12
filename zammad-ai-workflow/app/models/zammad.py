@@ -16,6 +16,18 @@ class ZammadTicket(BaseModel):
         description="ID of the group assigned to the ticket",
         default=None,
     )
+    owner_id: int | None = Field(
+        description="ID of the ticket owner; 1 means nobody owns it",
+        default=None,
+    )
+    tags: list[str] = Field(
+        description="Tags on the ticket",
+        default_factory=list,
+    )
+    ai_answered_through_article_id: int | None = Field(
+        description="Newest customer article the AI has answered, from the hidden ticket attribute",
+        default=None,
+    )
     articles: list["ZammadArticle"] = Field(
         description="List of articles associated with the ticket",
         default_factory=list,
@@ -83,6 +95,10 @@ class ZammadArticle(BaseModel):
     )
     sender: str | None = Field(
         description="Zammad sender role, for example Customer or Agent",
+        default=None,
+    )
+    created_by_id: int | None = Field(
+        description="ID of the user who created the article",
         default=None,
     )
     from_: str | None = Field(

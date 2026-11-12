@@ -49,6 +49,16 @@ Creating an article means Zammad accepted it. It does not prove delivery by the 
 3. Set `handoff_ticket_state`, when configured.
 4. Post the localized public acknowledgement (`human_review_public_fallback` or `no_answer_public_fallback`).
 
+## Turns and Human Takeover
+
+A ticket is a conversation, answered turn by turn (`app/conversation/turn.py`):
+
+- **Turn:** the public customer messages after `ai_answered_through_article_id`, oldest first. Internal, Agent, System and web-form articles are never part of a turn.
+- **Takeover:** the AI does not answer when a human agent replied publicly since its last answer, when a human agent owns the ticket (owner `1` means unassigned), or when the ticket carries a hand-off tag (`human_review_tag`, `no_answer_tag`, `failed_tag`).
+- **Resume:** the tag in `conversation.resume_tag` (default `ai_resume`) hands the ticket back to the AI.
+
+The AI tells its own articles from a human's by the service user's ID, from `GET /api/v1/users/me`. Only the REST client supports this.
+
 ## Known Limits
 
 - **Duplicates:** there is no durable idempotency. A redelivered Kafka message can create a second reply.
