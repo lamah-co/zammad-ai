@@ -2,6 +2,7 @@
 
 from collections.abc import Collection, Sequence
 from dataclasses import dataclass
+from datetime import datetime
 
 from app.models.zammad import ZammadArticle, ZammadTicket
 
@@ -97,3 +98,58 @@ def decide_turn(
         articles=unanswered_turn(ticket),
         blocked_by=takeover_reason(ticket, ai_user_id=ai_user_id, handoff_tags=handoff_tags, resume_tag=resume_tag),
     )
+
+
+@dataclass(frozen=True, slots=True)
+class Readiness:
+    """Whether a turn can be answered now, or how long to wait for the customer to finish writing."""
+
+    wait_seconds: float
+    after_cap: bool = False
+
+    @property
+    def ready(self) -> bool:
+        """Return whether the turn can be answered now."""
+        return self.wait_seconds <= 0
+
+
+def turn_readiness(
+    articles: Sequence[ZammadArticle], *, now: datetime, quiet_seconds: float, max_wait_seconds: float
+) -> Readiness:
+    """Return whether the turn is ready: its newest message is quiet_seconds old, or its first is max_wait_seconds old.
+
+    Messages without a timestamp never delay the answer.
+    """
+    times = [article.created_at for article in articles if article.created_at is not None]
+    if quiet_seconds <= 0 or not times or len(times) != len(articles):
+        return Readiness(wait_seconds=0)
+    quiet_left = quiet_seconds - (now - max(times)).total_seconds()
+    if quiet_left <= 0:
+        return Readiness(wait_seconds=0)
+    cap_left = max_wait_seconds - (now - min(times)).total_seconds()
+    if cap_left <= 0:
+        return Readiness(wait_seconds=0, after_cap=True)
+    return Readiness(wait_seconds=min(quiet_left, cap_left))
+
+
+def message_gaps(articles: Sequence[ZammadArticle]) -> list[float]:
+    """Return the seconds between consecutive messages of a turn."""
+    times = sorted(article.created_at for article in articles if article.created_at is not None)
+    return [(later - earlier).total_seconds() for earlier, later in zip(times, times[1:], strict=False)]
+
+
+def seconds_after_ai_reply(ticket: ZammadTicket, articles: Sequence[ZammadArticle], *, ai_user_id: int) -> float | None:
+    """Return how long after the AI's previous public reply the turn started, or None without such a reply."""
+    if not articles or articles[0].created_at is None:
+        return None
+    start = articles[0].created_at
+    replies = [
+        article.created_at
+        for article in ticket.articles
+        if article.created_at is not None
+        and article.created_at <= start
+        and not article.internal
+        and (article.sender or "").casefold() == "agent"
+        and article.created_by_id == ai_user_id
+    ]
+    return (start - max(replies)).total_seconds() if replies else None

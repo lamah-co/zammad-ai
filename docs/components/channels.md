@@ -76,11 +76,27 @@ After the AI answers a ticket that carried the resume tag, it removes the tag, a
 
 With `conversation.enabled: false`, each event triages the newest customer message once, as before.
 
+### Quiet Period
+
+Customers often send several short messages in a row. A turn is answered only when its newest message is `conversation.quiet_seconds` old (default 10 s), and at the latest `conversation.max_wait_seconds` after its first message (default 60 s), even if the customer keeps writing. `quiet_seconds: 0` answers at once.
+
+The Kafka handler never waits. If a turn isn't quiet yet, it acknowledges the event and schedules an in-process re-check of the ticket for when the quiet period ends. Each ticket has at most one pending re-check, and a new event replaces it. A per-ticket lock keeps an event and a re-check from answering the same turn at once. A restart loses pending re-checks, and the next event for the ticket picks the turn up.
+
+Zammad's events reach Kafka a few seconds after the article is created, so part of the quiet period has usually passed before the first event arrives.
+
+Metrics:
+
+- `zammad_ai_turns_deferred_total`: events whose turn wasn't quiet yet.
+- `zammad_ai_turn_message_gap_seconds`: seconds between consecutive messages in an answered turn.
+- `zammad_ai_turns_answered_after_cap_total`: turns answered because the cap ran out.
+- `zammad_ai_turns_soon_after_reply_total`: turns that started within the cap after an AI reply. Many of them suggest the quiet period is too short.
+
 ## Known Limits
 
 - **Duplicates:** in single-pass mode (`conversation.enabled: false`) there is no durable idempotency, and a redelivered Kafka message can create a second reply.
 - **Hand-off steps:** a hand-off posts its note, acknowledgement and tag as separate requests. If the workflow stops after the acknowledgement and before the tag, the turn counts as handled, so the tag isn't added later.
-- **Bursts in progress:** a turn is answered as soon as its first event is handled. Messages that arrive while it's being answered form the next turn, so a burst can get two replies. The quiet period (#31) addresses this.
+- **Late messages:** a message that arrives while a turn is being answered, or more than `max_wait_seconds` into a burst, starts the next turn and gets its own reply.
+- **Lost re-checks:** a re-check pending during a restart is lost. The turn waits for the ticket's next event until the periodic reconcile (P3) exists.
 - **Delivery status:** the workflow does not check whether Zammad delivered the article.
 - **Queued messages:** the event does not identify an article, so two messages queued closely together both resolve to the newest one.
 - **EAI client:** only the standard REST client implements channel replies.
