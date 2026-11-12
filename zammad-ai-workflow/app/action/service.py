@@ -326,10 +326,6 @@ class ActionService:
             )
             self.logger.info(f"Posted handoff internal note for ticket {ticket_id} with category {category}")
 
-        if tag:
-            await self.zammad_client.add_tag_to_ticket(ticket_id=ticket_id, tag=tag)
-            self.logger.info(f"Tagged handoff ticket {ticket_id} with {tag}")
-
         if self.settings.triage.handoff_ticket_state:
             await self.zammad_client.set_ticket_state(
                 ticket_id=ticket_id,
@@ -351,6 +347,11 @@ class ActionService:
                 internal=False,
             )
             self.logger.info(f"Posted handoff acknowledgement for ticket {ticket_id} with category {category}")
+
+        # The tag goes last: it marks the hand-off as complete, so a retry after a crash still acknowledges.
+        if tag:
+            await self.zammad_client.add_tag_to_ticket(ticket_id=ticket_id, tag=tag)
+            self.logger.info(f"Tagged handoff ticket {ticket_id} with {tag}")
 
 
 class _SafeFormatDict(dict[str, str]):

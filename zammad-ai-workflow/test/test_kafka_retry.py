@@ -315,3 +315,37 @@ async def test_failure_hand_off_is_not_repeated_on_an_already_failed_ticket() ->
 
     assert handed_off is False
     service.zammad_client.post_answer.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_failure_tag_is_written_after_the_acknowledgement() -> None:
+    """The tag marks a completed hand-off, so a crash before it still lets a retry acknowledge the customer."""
+    service = ActionService.__new__(ActionService)
+    service.logger = MagicMock()
+    client = MagicMock()
+    for name in ("post_answer", "add_tag_to_ticket", "set_ticket_state"):
+        setattr(client, name, AsyncMock())
+    client.get_ticket_tags = AsyncMock(return_value=[])
+    service.zammad_client = client
+    service.settings = SimpleNamespace(
+        localization=LocalizationSettings(),
+        triage=SimpleNamespace(
+            human_review_public_fallback={"ar": "تم استلام طلبك", "en": "We received your request"},
+            no_answer_public_fallback=None,
+            human_review_internal_note=None,
+            no_answer_internal_note=None,
+            no_action_internal_note=None,
+            human_review_tag="ai_human_review",
+            no_answer_tag=None,
+            failed_internal_note="Failed: {reason}",
+            failed_category_name="Processing failed",
+            failed_tag="ai_failed",
+            handoff_ticket_state="open",
+            public_reply_subject={"ar": "الرد على طلبك", "en": "Answer"},
+        ),
+    )
+
+    await service.hand_off_failed_ticket(ticket_id=7, reason="r", customer_message="hello there")
+
+    order = [call[0] for call in client.method_calls if call[0] != "get_ticket_tags"]
+    assert order == ["post_answer", "set_ticket_state", "post_answer", "add_tag_to_ticket"]
