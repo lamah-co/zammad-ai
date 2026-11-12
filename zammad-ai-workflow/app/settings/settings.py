@@ -186,6 +186,13 @@ class ZammadAISettings(BaseSettings):
         return self
 
     @model_validator(mode="after")
+    def validate_conversation_client(self) -> "ZammadAISettings":
+        """Conversation mode needs the REST client, which can identify its own user and write the ticket marker."""
+        if self.conversation.enabled and self.zammad.type != "api":
+            raise ValueError("conversation.enabled requires zammad.type: api")
+        return self
+
+    @model_validator(mode="after")
     def validate_static_reply_languages(self) -> "ZammadAISettings":
         """Require every static customer reply to cover all supported languages."""
         replies: dict[str, LocalizedText | None] = {

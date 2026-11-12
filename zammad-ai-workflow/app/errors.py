@@ -65,6 +65,10 @@ class ZammadPayloadParseError(ZammadPermanentError):
     """Raised when Zammad response payload parsing fails."""
 
 
+class ZammadMissingTicketAttributeError(ZammadPermanentError):
+    """Raised when Zammad lacks a ticket attribute the workflow needs."""
+
+
 class UnsupportedReplyChannelError(ZammadPermanentError):
     """Raised when a public answer cannot be mapped to a delivery channel."""
 
