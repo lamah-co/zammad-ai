@@ -32,9 +32,11 @@ A failing event is retried inside the consumer, up to `kafka.retry.max_attempts`
 
 - **Budget used up:** the ticket is handed to a person with an internal note, the `ai_failed` tag and the localized acknowledgement, and the event is acknowledged.
 - **Billing or credential errors** (for example a `402` for depleted prepaid credits): hand off on the first failure, since retrying cannot help.
-- **Zammad cannot take the hand-off:** the event is not acknowledged. Kafka redelivers it after `kafka.retry.max_backoff_seconds`, so nothing is dropped and nothing is hammered.
+- **Other permanent errors on an existing ticket:** handed off at once. Only an event without a usable ticket is dropped.
+- **Zammad unreachable during the hand-off:** the event is not acknowledged. Kafka redelivers it after `kafka.retry.max_backoff_seconds`, so nothing is dropped and nothing is hammered.
+- **Any other hand-off failure:** logged, counted and acknowledged, so a bug can never block the events behind it. The email alerts report it.
 
-The metrics `zammad_ai_event_retries_total` and `zammad_ai_event_handoffs_total`, labelled by error class, show both paths.
+The metrics `zammad_ai_event_retries_total`, `zammad_ai_event_handoffs_total` and `zammad_ai_event_handoff_failures_total`, labelled by error class, show these paths.
 
 ## Kafka Configuration & Security
 

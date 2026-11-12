@@ -2,7 +2,7 @@
 
 from typing import Literal
 
-from pydantic import BaseModel, Field, FilePath, NonNegativeFloat, PositiveInt
+from pydantic import BaseModel, Field, FilePath, NonNegativeFloat, PositiveInt, model_validator
 
 
 class KafkaSettings(BaseModel):
@@ -46,6 +46,22 @@ class KafkaSettings(BaseModel):
         description="Retry budget for events that fail with a retryable error.",
         default_factory=lambda: KafkaRetrySettings(),
     )
+    max_poll_interval_seconds: PositiveInt = Field(
+        default=900,
+        description="Longest time one event may be processed before Kafka gives it to the consumer again.",
+    )
+
+    @model_validator(mode="after")
+    def validate_retry_fits_poll_interval(self) -> "KafkaSettings":
+        """Keep the retry waits well inside the poll interval, so a retried event is never processed twice."""
+        waits: float = self.retry.total_backoff_seconds() + self.retry.max_backoff_seconds
+        if waits > self.max_poll_interval_seconds / 2:
+            raise ValueError(
+                f"kafka.retry waits up to {waits:.0f}s per event, more than half of "
+                f"kafka.max_poll_interval_seconds ({self.max_poll_interval_seconds}s). "
+                "Lower the retry budget or raise the poll interval."
+            )
+        return self
 
 
 class KafkaRetrySettings(BaseModel):
@@ -63,6 +79,14 @@ class KafkaRetrySettings(BaseModel):
         default=60.0,
         description="Upper bound for one wait, also used while a hand-off cannot be written to Zammad.",
     )
+
+    def backoff_seconds(self, attempt: int) -> float:
+        """Return the wait after the given attempt: exponential, capped at max_backoff_seconds."""
+        return min(self.initial_backoff_seconds * (2 ** (attempt - 1)), self.max_backoff_seconds)
+
+    def total_backoff_seconds(self) -> float:
+        """Return the sum of all waits between attempts for one event."""
+        return sum(self.backoff_seconds(attempt) for attempt in range(1, self.max_attempts))
 
 
 class EventProcessingSettings(BaseModel):

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass
 from enum import Enum
 
@@ -234,6 +233,20 @@ def classify_exception(
     )
 
 
+def _status_code(error: BaseException) -> int | None:
+    """Return the HTTP status code exposed by the provider SDK, searching the cause chain."""
+    seen: set[int] = set()
+    current: BaseException | None = error
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        for attribute in ("code", "status_code"):
+            value = getattr(current, attribute, None)
+            if isinstance(value, int):
+                return value
+        current = current.__cause__ or current.__context__
+    return None
+
+
 def classify_provider_error(error: Exception) -> GenAIError:
     """Map provider/library exceptions to a typed GenAI error class."""
     error_name = f"{type(error).__module__}.{type(error).__name__}".lower()
@@ -252,9 +265,7 @@ def classify_provider_error(error: Exception) -> GenAIError:
     if "timeout" in error_name or "timeout" in message:
         return GenAITimeoutError("GenAI request timed out")
 
-    if re.search(r"\b402\b", message) or any(
-        token in message for token in ("prepayment", "credits are depleted", "billing")
-    ):
+    if _status_code(error) == 402 or any(token in message for token in ("prepayment credits", "credits are depleted")):
         return GenAIBillingError("GenAI account has no usable billing balance")
 
     if any(token in error_name for token in ("ratelimit", "quota")) or any(

@@ -259,19 +259,28 @@ class ActionService:
             global _service
             _service = None
 
-    async def hand_off_failed_ticket(self, *, ticket_id: int, reason: str, customer_message: str) -> None:
-        """Hand a ticket that could not be processed to a human, with the customer acknowledgement."""
+    async def hand_off_failed_ticket(self, *, ticket_id: int, reason: str, customer_message: str) -> bool:
+        """Hand a ticket that could not be processed to a human, with the customer acknowledgement.
+
+        Returns:
+            bool: False when the ticket already carries the failure tag, so nothing is posted twice.
+        """
+        failed_tag = self.settings.triage.failed_tag
+        if failed_tag and failed_tag in await self.zammad_client.get_ticket_tags(ticket_id=ticket_id):
+            self.logger.info(f"Ticket {ticket_id} was already handed off after a failure; not posting again.")
+            return False
         await self._execute_handoff(
             ticket_id=ticket_id,
-            category="Processing failed",
+            category=self.settings.triage.failed_category_name,
             action="none",
             reason=reason,
             customer_message=customer_message,
             human_review=True,
             language=guess_language(customer_message, self.settings.localization),
             internal_note_override=self.settings.triage.failed_internal_note,
-            tag_override=self.settings.triage.failed_tag,
+            tag_override=failed_tag,
         )
+        return True
 
     async def _execute_handoff(
         self,

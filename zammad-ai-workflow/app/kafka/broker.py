@@ -39,30 +39,11 @@ EVENT_HANDOFFS_TOTAL = Counter(
     documentation="Ticket events handed to a human after the retry budget ran out or a person was required.",
     labelnames=("reason",),
 )
-
-
-def _backoff_seconds(attempt: int, retry: KafkaRetrySettings) -> float:
-    """Return the wait before the next attempt: exponential, capped at max_backoff_seconds."""
-    return min(retry.initial_backoff_seconds * (2 ** (attempt - 1)), retry.max_backoff_seconds)
-
-
-def _handle_processing_exception(
-    error: Exception,
-    ticket: object,
-    category_wrong_retry_confidence_threshold: float,
-) -> None:
-    """Classify processing errors and raise the corresponding ack/nack signal."""
-    decision: ExceptionDecision = classify_exception(
-        error,
-        category_wrong_retry_confidence_threshold=category_wrong_retry_confidence_threshold,
-    )
-    logger.error(
-        f"Kafka event decision={decision.decision} reason={decision.reason} error_class={decision.error_class} ticket={ticket} caught_class={type(error).__name__}",
-        exc_info=True,
-    )
-    if decision.decision == AckDecision.NACK_RETRY:
-        raise NackMessage()
-    raise AckMessage()
+EVENT_HANDOFF_FAILURES_TOTAL = Counter(
+    name="zammad_ai_event_handoff_failures_total",
+    documentation="Hand-offs that failed for a reason other than Zammad being unreachable; the event was acknowledged.",
+    labelnames=("reason",),
+)
 
 
 def build_router(settings: ZammadAISettings) -> tuple[KafkaRouter, Callable]:
@@ -106,7 +87,7 @@ def build_router(settings: ZammadAISettings) -> tuple[KafkaRouter, Callable]:
             zammad_client: BaseZammadClient = triage_service.zammad_client
             ticket: ZammadTicket = await zammad_client.get_ticket(id=ticket_id)
         except TicketNotFoundError as e:
-            logger.info(f"Ticket {ticket_id} does not exist anymore.")
+            logger.info(f"Ticket {ticket_id} does not exist anymore.", exc_info=True)
             raise KafkaPayloadError("Ticket was not found", retryable=False) from e
         except (ZammadRetryableError, ZammadConnectionError) as e:
             logger.error("Error connecting to Zammad", exc_info=True)
@@ -157,28 +138,35 @@ def build_router(settings: ZammadAISettings) -> tuple[KafkaRouter, Callable]:
                     ) from e
 
     async def hand_off(ticket_id: int, decision: ExceptionDecision, attempts: int) -> None:
-        """Hand the ticket to a human. Keep the event when Zammad cannot take the hand-off."""
+        """Hand the ticket to a human. Keep the event only while Zammad is unreachable."""
         try:
             ticket: ZammadTicket = await triage_service.zammad_client.get_ticket(id=ticket_id)
             article = ticket.latest_customer_article()
-            await action_service.hand_off_failed_ticket(
+            handed_off: bool = await action_service.hand_off_failed_ticket(
                 ticket_id=ticket_id,
                 reason=f"{decision.error_class} after {attempts} attempt(s)",
                 customer_message=article.text if article else "",
             )
-            logger.warning(f"Handed off ticket {ticket_id} after {attempts} attempt(s): {decision.error_class}")
+            if handed_off:
+                logger.warning(f"Handed off ticket {ticket_id} after {attempts} attempt(s): {decision.error_class}")
         except TicketNotFoundError as e:
-            logger.info(f"Ticket {ticket_id} disappeared before the hand-off.")
+            logger.info(f"Ticket {ticket_id} disappeared before the hand-off.", exc_info=True)
             raise AckMessage() from e
-        except Exception as e:
-            logger.error(f"Could not hand off ticket {ticket_id}; keeping the event for redelivery.", exc_info=True)
+        except (ZammadRetryableError, ZammadConnectionError) as e:
+            logger.error(f"Zammad is unreachable; keeping the event for ticket {ticket_id}.", exc_info=True)
             await asyncio.sleep(retry.max_backoff_seconds)
             raise NackMessage() from e
+        except Exception as e:
+            # Never block the queue on a hand-off bug: count it, alert on it, and move on.
+            EVENT_HANDOFF_FAILURES_TOTAL.labels(reason=type(e).__name__).inc()
+            logger.error(f"Hand-off failed for ticket {ticket_id}; acknowledging the event.", exc_info=True)
+            raise AckMessage() from e
 
     @router.subscriber(
         settings.kafka.topic,
         group_id=settings.kafka.group_id,
         ack_policy=AckPolicy.NACK_ON_ERROR,
+        max_poll_interval_ms=settings.kafka.max_poll_interval_seconds * 1000,
     )
     async def event_handler(
         event: dict[str, object],
@@ -212,12 +200,9 @@ def build_router(settings: ZammadAISettings) -> tuple[KafkaRouter, Callable]:
             # Extract ticket ID
             try:
                 ticket_id: int = int(parsed_event.ticket)
-            except TypeError, ValueError:
-                _handle_processing_exception(
-                    KafkaPayloadError("Invalid ticket id in Kafka payload"),
-                    ticket=parsed_event.ticket,
-                    category_wrong_retry_confidence_threshold=settings.triage.category_wrong_retry_confidence_threshold,
-                )
+            except (TypeError, ValueError) as e:
+                logger.error(f"Kafka event has an invalid ticket id: {parsed_event.ticket!r}", exc_info=True)
+                raise AckMessage() from e
 
             attempt = 0
             while True:
@@ -231,15 +216,23 @@ def build_router(settings: ZammadAISettings) -> tuple[KafkaRouter, Callable]:
                         e,
                         category_wrong_retry_confidence_threshold=settings.triage.category_wrong_retry_confidence_threshold,
                     )
+                    # Only an event without a usable ticket is dropped; every other failure reaches a person.
+                    drop: bool = decision.decision == AckDecision.ACK_DROP and isinstance(e, KafkaPayloadError)
+                    retry_next: bool = decision.decision == AckDecision.NACK_RETRY and attempt < retry.max_attempts
+                    next_step = (
+                        f"retry in {retry.backoff_seconds(attempt):.0f}s"
+                        if retry_next
+                        else ("drop" if drop else "hand off")
+                    )
                     logger.error(
-                        f"Kafka event decision={decision.decision} reason={decision.reason} error_class={decision.error_class} ticket={ticket_id} attempt={attempt}/{retry.max_attempts}",
+                        f"Kafka event decision={decision.decision} reason={decision.reason} error_class={decision.error_class} ticket={ticket_id} attempt={attempt}/{retry.max_attempts} next={next_step}",
                         exc_info=True,
                     )
-                    if decision.decision == AckDecision.ACK_DROP:
+                    if drop:
                         raise AckMessage() from e
-                    if decision.decision == AckDecision.NACK_RETRY and attempt < retry.max_attempts:
+                    if retry_next:
                         EVENT_RETRIES_TOTAL.labels(reason=decision.error_class).inc()
-                        await asyncio.sleep(_backoff_seconds(attempt, retry))
+                        await asyncio.sleep(retry.backoff_seconds(attempt))
                         continue
                     EVENT_HANDOFFS_TOTAL.labels(reason=decision.error_class).inc()
                     await hand_off(ticket_id, decision, attempt)

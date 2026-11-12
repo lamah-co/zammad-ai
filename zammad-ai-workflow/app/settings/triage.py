@@ -55,6 +55,10 @@ class TriageSettings(BaseModel):
         ),
         description="Internal note posted when processing fails permanently. Supports {category}, {action}, {reason} and {customer_message}.",
     )
+    failed_category_name: str = Field(
+        default="Processing failed",
+        description="Category shown in the internal note of a failure hand-off.",
+    )
     failed_tag: str | None = Field(
         default="ai_failed",
         description="Tag added when processing fails permanently and the ticket is handed off.",

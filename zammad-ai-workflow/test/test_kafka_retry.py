@@ -17,15 +17,15 @@ from app.errors import (
     classify_exception,
     classify_provider_error,
 )
-from app.kafka.broker import _backoff_seconds, build_router
+from app.kafka.broker import build_router
 from app.models.kafka import Event
 from app.models.triage import TriageResult
 from app.models.zammad import ZammadArticle, ZammadTicket
 from app.settings import ZammadAISettings
-from app.settings.kafka import KafkaRetrySettings
+from app.settings.kafka import KafkaRetrySettings, KafkaSettings
 from app.settings.localization import LocalizationSettings
 from app.settings.triage import Action, ActionTypes, Category
-from app.zammad.base import ZammadConnectionError
+from app.zammad.base import TicketNotFoundError, ZammadConnectionError
 
 DEPLETED_CREDITS = (
     "402 RESOURCE_EXHAUSTED. {'error': {'code': 402, 'message': 'Your prepayment credits are depleted.'}}"
@@ -75,7 +75,7 @@ def action() -> MagicMock:
     """Return an action service with async execution and hand-off."""
     service = MagicMock()
     service.execute_action = AsyncMock()
-    service.hand_off_failed_ticket = AsyncMock()
+    service.hand_off_failed_ticket = AsyncMock(return_value=True)
     return service
 
 
@@ -190,11 +190,26 @@ async def test_event_is_kept_when_zammad_cannot_take_the_hand_off(
 
 
 @pytest.mark.asyncio
-async def test_permanent_error_is_dropped_without_hand_off(
+async def test_permanent_error_on_a_real_ticket_is_handed_off(
+    handler, event: Event, triage: MagicMock, action: MagicMock, sleep: AsyncMock
+) -> None:
+    """A permanent error never leaves the customer silent: it is handed off at once, without retries."""
+    triage.perform_triage.side_effect = TriageError("invalid", retryable=False)
+
+    with pytest.raises(AckMessage):
+        await handler(event=event)
+
+    assert triage.perform_triage.await_count == 1
+    sleep.assert_not_awaited()
+    action.hand_off_failed_ticket.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_event_without_a_usable_ticket_is_dropped(
     handler, event: Event, triage: MagicMock, action: MagicMock
 ) -> None:
-    """Permanent errors that a person cannot act on keep today's acknowledge-and-drop behaviour."""
-    triage.perform_triage.side_effect = TriageError("invalid", retryable=False)
+    """A ticket that no longer exists cannot be handed off, so the event is dropped."""
+    triage.zammad_client.get_ticket.side_effect = TicketNotFoundError("gone")
 
     with pytest.raises(AckMessage):
         await handler(event=event)
@@ -202,16 +217,47 @@ async def test_permanent_error_is_dropped_without_hand_off(
     action.hand_off_failed_ticket.assert_not_awaited()
 
 
+@pytest.mark.asyncio
+async def test_unexpected_hand_off_error_does_not_block_the_queue(
+    handler, event: Event, triage: MagicMock, action: MagicMock, sleep: AsyncMock
+) -> None:
+    """A bug in the hand-off is acknowledged and counted instead of redelivering the event forever."""
+    triage.perform_triage.side_effect = TriageError("invalid", retryable=False)
+    action.hand_off_failed_ticket.side_effect = AttributeError("bug in hand-off")
+
+    with pytest.raises(AckMessage):
+        await handler(event=event)
+
+    sleep.assert_not_awaited()
+
+
 def test_backoff_doubles_and_is_capped() -> None:
     """Waits grow 2, 4, 8 ... and never exceed max_backoff_seconds."""
     retry = KafkaRetrySettings(initial_backoff_seconds=2, max_backoff_seconds=10)
 
-    assert [_backoff_seconds(attempt, retry) for attempt in range(1, 6)] == [2, 4, 8, 10, 10]
+    assert [retry.backoff_seconds(attempt) for attempt in range(1, 6)] == [2, 4, 8, 10, 10]
+
+
+def test_retry_waits_must_fit_well_inside_the_poll_interval() -> None:
+    """A budget whose waits exceed half the poll interval is rejected, so an event is never processed twice."""
+    KafkaSettings()  # defaults: 30 s of waits plus 60 s, well inside 900 s
+
+    with pytest.raises(ValueError, match="max_poll_interval_seconds"):
+        KafkaSettings(
+            retry=KafkaRetrySettings(max_attempts=10, initial_backoff_seconds=30, max_backoff_seconds=120),
+            max_poll_interval_seconds=600,
+        )
 
 
 def test_depleted_credits_are_a_billing_error_not_a_model_error() -> None:
     """The production 402 message must map to the billing class, and quota errors keep their class."""
     assert isinstance(classify_provider_error(Exception(DEPLETED_CREDITS)), GenAIBillingError)
+    status_error = Exception("payment required")
+    status_error.code = 402  # type: ignore
+    assert isinstance(classify_provider_error(status_error), GenAIBillingError)
+    assert not isinstance(
+        classify_provider_error(Exception("timeout for request id 402 at /billing")), GenAIBillingError
+    )
     assert isinstance(classify_provider_error(Exception("429 quota exceeded")), GenAIQuotaError)
     decision = classify_exception(GenAIBillingError("no credits"), category_wrong_retry_confidence_threshold=0.5)
     assert decision.decision == AckDecision.HANDOFF
@@ -224,7 +270,10 @@ async def test_failure_hand_off_posts_note_tag_and_localized_acknowledgement(tex
     service = ActionService.__new__(ActionService)
     service.logger = MagicMock()
     service.zammad_client = MagicMock(
-        post_answer=AsyncMock(), add_tag_to_ticket=AsyncMock(), set_ticket_state=AsyncMock()
+        post_answer=AsyncMock(),
+        add_tag_to_ticket=AsyncMock(),
+        set_ticket_state=AsyncMock(),
+        get_ticket_tags=AsyncMock(return_value=[]),
     )
     service.settings = SimpleNamespace(
         localization=LocalizationSettings(),
@@ -237,6 +286,7 @@ async def test_failure_hand_off_posts_note_tag_and_localized_acknowledgement(tex
             human_review_tag="ai_human_review",
             no_answer_tag=None,
             failed_internal_note="Failed: {reason}\n{customer_message}",
+            failed_category_name="Processing failed",
             failed_tag="ai_failed",
             handoff_ticket_state="open",
             public_reply_subject={"ar": "الرد على طلبك", "en": "Answer"},
@@ -251,3 +301,17 @@ async def test_failure_hand_off_posts_note_tag_and_localized_acknowledgement(tex
     service.zammad_client.set_ticket_state.assert_awaited_once_with(ticket_id=7, state="open")
     expected = "We received your request" if language == "en" else "تم استلام طلبك"
     assert acknowledgement["internal"] is False and acknowledgement["text"] == expected
+
+
+@pytest.mark.asyncio
+async def test_failure_hand_off_is_not_repeated_on_an_already_failed_ticket() -> None:
+    """If the failure tag is already there, a redelivered hand-off posts nothing."""
+    service = ActionService.__new__(ActionService)
+    service.logger = MagicMock()
+    service.zammad_client = MagicMock(post_answer=AsyncMock(), get_ticket_tags=AsyncMock(return_value=["ai_failed"]))
+    service.settings = SimpleNamespace(triage=SimpleNamespace(failed_tag="ai_failed"))
+
+    handed_off = await service.hand_off_failed_ticket(ticket_id=7, reason="r", customer_message="hi")
+
+    assert handed_off is False
+    service.zammad_client.post_answer.assert_not_awaited()
