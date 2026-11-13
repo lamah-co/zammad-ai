@@ -47,6 +47,22 @@ class TriageSettings(BaseModel):
         default=None,
         description="Tag added when the selected outcome requires human review.",
     )
+    failed_internal_note: str | None = Field(
+        default=(
+            "AI could not process this ticket and handed it to a human.\n"
+            "Reason: {reason}\n"
+            "Customer message:\n{customer_message}"
+        ),
+        description="Internal note posted when processing fails permanently. Supports {category}, {action}, {reason} and {customer_message}.",
+    )
+    failed_category_name: str = Field(
+        default="Processing failed",
+        description="Category shown in the internal note of a failure hand-off.",
+    )
+    failed_tag: str | None = Field(
+        default="ai_failed",
+        description="Tag added when processing fails permanently and the ticket is handed off.",
+    )
     public_reply_subject: LocalizedText = Field(
         default_factory=lambda: {"ar": "الرد على طلبك", "en": "Answer"},
         description="Subject of static customer replies and handoff acknowledgements, per language.",
@@ -172,7 +188,12 @@ class TriageSettings(BaseModel):
     @model_validator(mode="before")
     def validate_note_template_variables(cls, values: dict) -> dict:
         """Validate internal-note templates only use supported variables."""
-        note_fields = ("no_action_internal_note", "no_answer_internal_note", "human_review_internal_note")
+        note_fields = (
+            "no_action_internal_note",
+            "no_answer_internal_note",
+            "human_review_internal_note",
+            "failed_internal_note",
+        )
         valid_variables = {"category", "action", "reason", "customer_message"}
 
         for field_name in note_fields:

@@ -109,6 +109,15 @@ class BaseZammadClient(ABC):
         """
         ...
 
+    async def get_ticket_tags(self, ticket_id: int) -> list[str]:
+        """Return the tags of a ticket. Clients that cannot read tags return an empty list.
+
+        Args:
+            ticket_id: Zammad ticket identifier.
+
+        """
+        return []
+
     @abstractmethod
     async def add_tag_to_ticket(
         self,

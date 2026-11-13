@@ -194,6 +194,11 @@ kafka:
   event_processing:
     valid_request_types: [] # List of request types to process (example: ["support"])
     valid_action_types: [] # List of action types to process (example: ["created", "updated"])
+  retry:
+    max_attempts: 5 # Attempts per event before the ticket is handed off to a human
+    initial_backoff_seconds: 2 # Wait before the first retry; doubles each time
+    max_backoff_seconds: 60 # Cap for one wait, also used while Zammad cannot take the hand-off
+  max_poll_interval_seconds: 900 # Longest processing time per event; the retry waits must stay under half of it
 
   # mTLS Security Configuration (optional)
   # Option 1: File-based mTLS (type: "file")

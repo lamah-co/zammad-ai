@@ -4,7 +4,7 @@ from collections.abc import Callable
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from faststream.exceptions import AckMessage, NackMessage
+from faststream.exceptions import AckMessage
 from faststream.kafka import TestKafkaBroker
 
 from app.errors import TriageCategoryWrongError, TriageError
@@ -146,8 +146,17 @@ def mock_get_action_service(monkeypatch: pytest.MonkeyPatch) -> MagicMock:
     """Patch Kafka router action lookup to return a mocked action service."""
     action_service = MagicMock()
     action_service.execute_action = AsyncMock()
+    action_service.hand_off_failed_ticket = AsyncMock()
     monkeypatch.setattr("app.kafka.broker.get_action_service", lambda *args, **kwargs: action_service)
     return action_service
+
+
+@pytest.fixture(autouse=True)
+def no_retry_sleep(monkeypatch: pytest.MonkeyPatch) -> AsyncMock:
+    """Skip real backoff waits so retry tests stay fast; the mock records the requested waits."""
+    sleep = AsyncMock()
+    monkeypatch.setattr("app.kafka.broker.asyncio.sleep", sleep)
+    return sleep
 
 
 @pytest.mark.asyncio
@@ -281,20 +290,24 @@ async def test_event_handler_case_sensitive_request_type(
 
 
 @pytest.mark.asyncio
-async def test_event_handler_nack_on_retryable_typed_error(
+async def test_event_handler_retries_then_hands_off_retryable_typed_error(
     kafka_message_factory: Callable[..., dict[str, str]],
     mock_triage: MagicMock,
     mock_get_triage: None,
+    mock_get_action_service: MagicMock,
     settings_factory: Callable[..., ZammadAISettings],
 ) -> None:
-    """Retryable typed triage errors must produce NACK to trigger broker retry."""
+    """Retryable errors are retried up to the budget, then the ticket is handed off and the event acknowledged."""
     settings = settings_factory(valid_request_types=["technischer Bürgersupport"])
     router, event_handler = build_router(settings=settings)
     mock_triage.perform_triage.side_effect = TriageError("retryable triage", retryable=True)
 
     event = Event.model_validate(kafka_message_factory())
-    with pytest.raises(NackMessage):
+    with pytest.raises(AckMessage):
         await event_handler(event=event)
+
+    assert mock_triage.perform_triage.await_count == settings.kafka.retry.max_attempts
+    mock_get_action_service.hand_off_failed_ticket.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -339,7 +352,7 @@ async def test_event_handler_category_wrong_retries_below_threshold(
     mock_get_triage: None,
     settings_factory: Callable[..., ZammadAISettings],
 ) -> None:
-    """Category wrong errors with low confidence are retried."""
+    """Category wrong errors with low confidence are retried, then handed off when the budget runs out."""
     settings = settings_factory(valid_request_types=["technischer Bürgersupport"])
     settings.triage.category_wrong_retry_confidence_threshold = 0.7
     router, event_handler = build_router(settings=settings)
@@ -349,8 +362,10 @@ async def test_event_handler_category_wrong_retries_below_threshold(
     )
 
     event = Event.model_validate(kafka_message_factory())
-    with pytest.raises(NackMessage):
+    with pytest.raises(AckMessage):
         await event_handler(event=event)
+
+    assert mock_triage.perform_triage.await_count == settings.kafka.retry.max_attempts
 
 
 @pytest.mark.asyncio

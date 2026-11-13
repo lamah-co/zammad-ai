@@ -14,7 +14,7 @@ from app.settings.settings import ZammadAISettings
 from app.settings.triage import ActionTypes
 from app.settings.zammad import ZammadAPISettings, ZammadEAISettings
 from app.triage.triage import TriageResult
-from app.utils.localization import resolve_localized_text
+from app.utils.localization import guess_language, resolve_localized_text
 from app.utils.logging import getLogger
 from app.zammad.api import ZammadAPIClient
 from app.zammad.eai import ZammadEAIClient
@@ -259,6 +259,29 @@ class ActionService:
             global _service
             _service = None
 
+    async def hand_off_failed_ticket(self, *, ticket_id: int, reason: str, customer_message: str) -> bool:
+        """Hand a ticket that could not be processed to a human, with the customer acknowledgement.
+
+        Returns:
+            bool: False when the ticket already carries the failure tag, so nothing is posted twice.
+        """
+        failed_tag = self.settings.triage.failed_tag
+        if failed_tag and failed_tag in await self.zammad_client.get_ticket_tags(ticket_id=ticket_id):
+            self.logger.info(f"Ticket {ticket_id} was already handed off after a failure; not posting again.")
+            return False
+        await self._execute_handoff(
+            ticket_id=ticket_id,
+            category=self.settings.triage.failed_category_name,
+            action="none",
+            reason=reason,
+            customer_message=customer_message,
+            human_review=True,
+            language=guess_language(customer_message, self.settings.localization),
+            internal_note_override=self.settings.triage.failed_internal_note,
+            tag_override=failed_tag,
+        )
+        return True
+
     async def _execute_handoff(
         self,
         *,
@@ -269,6 +292,8 @@ class ActionService:
         customer_message: str,
         human_review: bool,
         language: str | None,
+        internal_note_override: str | None = None,
+        tag_override: str | None = None,
     ) -> None:
         """Notify the customer and surface unresolved tickets for agent follow-up."""
         public_fallback = (
@@ -276,12 +301,14 @@ class ActionService:
             if human_review
             else self.settings.triage.no_answer_public_fallback
         )
-        internal_note_template = (
+        internal_note_template = internal_note_override or (
             self.settings.triage.human_review_internal_note
             if human_review
             else self.settings.triage.no_answer_internal_note or self.settings.triage.no_action_internal_note
         )
-        tag = self.settings.triage.human_review_tag if human_review else self.settings.triage.no_answer_tag
+        tag = tag_override or (
+            self.settings.triage.human_review_tag if human_review else self.settings.triage.no_answer_tag
+        )
 
         if internal_note_template:
             text: str = _safe_format(
@@ -298,10 +325,6 @@ class ActionService:
                 internal=True,
             )
             self.logger.info(f"Posted handoff internal note for ticket {ticket_id} with category {category}")
-
-        if tag:
-            await self.zammad_client.add_tag_to_ticket(ticket_id=ticket_id, tag=tag)
-            self.logger.info(f"Tagged handoff ticket {ticket_id} with {tag}")
 
         if self.settings.triage.handoff_ticket_state:
             await self.zammad_client.set_ticket_state(
@@ -324,6 +347,11 @@ class ActionService:
                 internal=False,
             )
             self.logger.info(f"Posted handoff acknowledgement for ticket {ticket_id} with category {category}")
+
+        # The tag goes last: it marks the hand-off as complete, so a retry after a crash still acknowledges.
+        if tag:
+            await self.zammad_client.add_tag_to_ticket(ticket_id=ticket_id, tag=tag)
+            self.logger.info(f"Tagged handoff ticket {ticket_id} with {tag}")
 
 
 class _SafeFormatDict(dict[str, str]):

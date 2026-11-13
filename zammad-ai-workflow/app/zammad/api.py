@@ -140,6 +140,11 @@ class ZammadAPIClient(BaseZammadClient):
         logger.info(f"Posted shared draft to ticket {ticket_id}")
 
     @override
+    async def get_ticket_tags(self, ticket_id: int) -> list[str]:
+        data = await self._request("GET", "/api/v1/tags", params={"object": "Ticket", "o_id": ticket_id})
+        return list(data.get("tags", [])) if isinstance(data, dict) else []
+
+    @override
     async def add_tag_to_ticket(self, ticket_id: int, tag: str) -> None:
         payload = ZammadTagAdd(item=tag, o_id=ticket_id)
         await self._request("POST", "/api/v1/tags/add", json=payload.model_dump())
