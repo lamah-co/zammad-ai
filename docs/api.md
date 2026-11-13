@@ -14,6 +14,11 @@ This document describes the HTTP API for the Zammad-AI service (v1).
 
 **Endpoints**
 
+- `GET /api/v1/health`
+  - Description: Container and deploy health check. Needs no API key.
+  - `200 {"status": "healthy", "reason": null}` when the service and its GenAI embedding provider work.
+  - `503 {"status": "degraded", "reason": "GenAIBillingError"}` while the provider is unavailable, for example when prepaid credits run out. The service keeps running and handles events, handing them off when the provider fails. It re-checks the provider in the background, waiting 5 to 60 seconds between checks, and returns to `200` once it answers. The `zammad_ai_provider_ready` metric shows the same state.
+
 - `POST /api/v1/triage`
   - Description: Classify ticket text and determine an action.
   - Request JSON: `{ "text": "...", "session_id": "optional-uuid" }`
