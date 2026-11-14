@@ -274,7 +274,15 @@ def classify_provider_error(error: Exception) -> GenAIError:
         return GenAIQuotaError("GenAI quota or rate limit reached")
 
     if any(token in error_name for token in ("authentication", "permission", "unauthorized", "forbidden")) or any(
-        token in message for token in ("authentication", "permission", "unauthorized", "forbidden")
+        token in message
+        for token in (
+            "authentication",
+            "permission",
+            "unauthorized",
+            "forbidden",
+            "api key not valid",
+            "api_key_invalid",
+        )
     ):
         return GenAIAuthError("GenAI authentication or authorization failed")
 

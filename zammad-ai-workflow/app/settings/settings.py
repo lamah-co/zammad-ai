@@ -14,6 +14,7 @@ from pydantic_settings import (
 
 from .answer import AnswerSettings
 from .api import APISettings
+from .conversation import ConversationSettings
 from .frontend import FrontendSettings
 from .genai import GenAIOpenAISettings, GenAIProviderSettings
 from .guardrails import GuardrailSettings
@@ -157,6 +158,10 @@ class ZammadAISettings(BaseSettings):
     localization: LocalizationSettings = Field(
         description="Settings for supported customer languages and localized fallback messages.",
         default_factory=lambda: LocalizationSettings(),
+    )
+    conversation: ConversationSettings = Field(
+        description="Settings for answering ticket conversations turn by turn.",
+        default_factory=lambda: ConversationSettings(),
     )
     preparser: "PreparserSettings" = Field(
         description="Settings for optional message preparsing before LLM processing.",

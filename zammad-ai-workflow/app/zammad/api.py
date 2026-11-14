@@ -46,6 +46,7 @@ class ZammadAPIClient(BaseZammadClient):
 
         self.kb_id = settings.knowledge_base_id
         self.rss_token = settings.rss_feed_token
+        self._own_user_id: int | None = None
 
     @override
     async def get_ticket(self, id: int) -> ZammadTicket:
@@ -138,6 +139,30 @@ class ZammadAPIClient(BaseZammadClient):
         payload = ZammadAPISharedDraft(new_article=ZammadSharedDraftArticle(body=text, ticket_id=ticket_id))
         await self._request("PUT", f"/api/v1/tickets/{ticket_id}/shared_draft", json=payload.model_dump(by_alias=True))
         logger.info(f"Posted shared draft to ticket {ticket_id}")
+
+    @override
+    async def get_ticket_with_context(self, id: int) -> ZammadTicket:
+        ticket = await self.get_ticket(id)
+        data = await self._request("GET", f"/api/v1/tickets/{id}")
+        if not isinstance(data, dict):
+            raise ZammadPayloadParseError(f"Invalid ticket payload for ticket {id}")
+        return ticket.model_copy(
+            update={
+                "group_id": data.get("group_id"),
+                "owner_id": data.get("owner_id"),
+                "ai_answered_through_article_id": data.get("ai_answered_through_article_id"),
+                "tags": await self.get_ticket_tags(ticket_id=id),
+            }
+        )
+
+    @override
+    async def get_own_user_id(self) -> int:
+        if self._own_user_id is None:
+            data = await self._request("GET", "/api/v1/users/me")
+            if not isinstance(data, dict) or not isinstance(data.get("id"), int):
+                raise ZammadPayloadParseError("Invalid payload for the current Zammad user")
+            self._own_user_id = data["id"]
+        return self._own_user_id
 
     @override
     async def get_ticket_tags(self, ticket_id: int) -> list[str]:
