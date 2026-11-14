@@ -21,13 +21,14 @@ settings: ZammadAIIndexSettings = get_settings()
 
 
 def prepare_qdrant_data(
-    answers: dict[int, KnowledgeBaseAnswer], client: ZammadAPIClient | ZammadEAIClient
+    answers: dict[int, KnowledgeBaseAnswer], client: ZammadAPIClient | ZammadEAIClient, project: str | None = None
 ) -> list[QdrantDocumentItem]:
     """Prepare data for Qdrant indexing based on knowledge base answers.
 
     Args:
         answers: Dictionary of answer ID to KnowledgeBaseAnswer objects
         client: Zammad API client instance
+        project: Project key stored with every vector, or None outside multi-project mode
 
     Returns:
         List of QdrantDocumentItem objects containing id, content, and metadata for indexing
@@ -45,7 +46,7 @@ def prepare_qdrant_data(
             page_content += _format_attachments_content(attachment_data)
 
             # Create metadata
-            metadata: QdrantVectorMetadata = _create_vector_metadata(answer, page_content)
+            metadata: QdrantVectorMetadata = _create_vector_metadata(answer, page_content, project)
             vector_id: UUID = uuid5(ZAMMAD_AI_NAMESPACE, f"KB-{metadata.answer_kb_id}-Answer-{metadata.answer_id}")
             item = QdrantDocumentItem(
                 vector_id=vector_id,
@@ -100,7 +101,9 @@ def _format_attachments_content(attachment_data: dict[int, tuple[str, str | None
     return content
 
 
-def _create_vector_metadata(answer: KnowledgeBaseAnswer, page_content: str) -> QdrantVectorMetadata:
+def _create_vector_metadata(
+    answer: KnowledgeBaseAnswer, page_content: str, project: str | None = None
+) -> QdrantVectorMetadata:
     """Create vector metadata from answer data.
 
     Builds comprehensive metadata for the vector document including answer details,
@@ -110,6 +113,7 @@ def _create_vector_metadata(answer: KnowledgeBaseAnswer, page_content: str) -> Q
     Args:
         answer: KnowledgeBaseAnswer object containing the source data
         page_content: Processed content string for hash calculation
+        project: Project key stored with the vector, or None outside multi-project mode
 
     Returns:
         QdrantVectorMetadata object with complete metadata for vector storage
@@ -117,7 +121,8 @@ def _create_vector_metadata(answer: KnowledgeBaseAnswer, page_content: str) -> Q
     """
     answer_url = None
     if settings.zammad.base_url:
-        answer_url = f"{settings.zammad.base_url}#knowledge_base/{settings.zammad.knowledge_base_id}/locale/de-de/answer/{answer.id}"
+        locale = getattr(settings.zammad, "rss_feed_locale", "de-de")
+        answer_url = f"{settings.zammad.base_url}#knowledge_base/{settings.zammad.knowledge_base_id}/locale/{locale}/answer/{answer.id}"
 
     return QdrantVectorMetadata(
         vector_updatedAt=datetime.now(timezone.utc),
@@ -130,6 +135,7 @@ def _create_vector_metadata(answer: KnowledgeBaseAnswer, page_content: str) -> Q
         answer_attachments=answer.attachments,
         answer_url=answer_url,
         pagecontent_hash=hash_content(normalize_content(page_content)),
+        project=project,
     )
 
 

@@ -24,6 +24,8 @@ class QdrantVectorMetadata(BaseModel):
     answer_url: str | None
     # hash of page_content
     pagecontent_hash: str | None = None
+    # project the answer belongs to, in multi-project mode
+    project: str | None = None
 
 
 class QdrantDocumentItem(BaseModel):

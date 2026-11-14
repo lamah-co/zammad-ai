@@ -36,6 +36,11 @@ def retrieve_answer_ids(
         is returned rather than raising exceptions.
 
     """
+    if settings.index.full_indexing and answer_ids_in_category:
+        # The KB's own answer list is cached on the KB record and goes stale when answers are added below
+        # categories; the category walk is current, so a full run over a category tree uses it directly.
+        logger.info("Performing full indexing of %d answers in the selected categories.", len(answer_ids_in_category))
+        return sorted(answer_ids_in_category)
     if settings.index.full_indexing:
         answer_ids: list[int] = _get_all_answer_ids(client)
     else:

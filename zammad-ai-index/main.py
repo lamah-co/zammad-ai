@@ -15,15 +15,20 @@ from qdrant_client.models import Record
 
 from job.data.processing import filter_for_changed_data, prepare_qdrant_data
 from job.data.retrieval import get_answers_data, retrieve_answer_ids, retrieve_deleted_answer_ids
+from job.docs.fetch import checkout
+from job.docs.mapping import build_plan
+from job.docs.sync import archive_category, sync_docs
 from job.law.ingest import ingest_law
 from job.models.qdrant import QdrantDocumentItem
 from job.models.zammad import KnowledgeBaseAnswer
-from job.qdrant.qdrant import QdrantKBClient
+from job.projects import ProjectConfig, load_projects
+from job.qdrant.qdrant import QdrantKBClient, ensure_collection
 from job.settings.settings import ZammadAIIndexSettings, get_settings
 from job.settings.zammad import ZammadAPISettings, ZammadEAISettings
 from job.utils.logging import getLogger
 from job.zammad.api import ZammadAPIClient
 from job.zammad.eai import ZammadEAIClient
+from job.zammad.kb_writer import KBWriter
 
 settings: ZammadAIIndexSettings = get_settings()
 logger: Logger = getLogger("zammad-ai-index")
@@ -33,6 +38,8 @@ def run_indexing(
     qdrant_client: QdrantKBClient,
     zammad_client: ZammadAPIClient | ZammadEAIClient,
     snapshot_already_created: bool = False,
+    category_ids: list[int] | None = None,
+    project: str | None = None,
 ) -> None:
     """Execute the complete indexing workflow.
 
@@ -58,7 +65,9 @@ def run_indexing(
 
     try:
         # Step 0: Retrieve answer IDs of filtered categories if category filtering is enabled
-        answer_ids_in_category: list[int] = zammad_client.get_answer_ids_of_categories(settings.zammad.category_ids)
+        answer_ids_in_category: list[int] = zammad_client.get_answer_ids_of_categories(
+            settings.zammad.category_ids if category_ids is None else category_ids
+        )
 
         # Step 1: Retrieve answer IDs for processing
         answer_ids: list[int] = retrieve_answer_ids(zammad_client, answer_ids_in_category)
@@ -80,7 +89,7 @@ def run_indexing(
         all_points: list[Record] = qdrant_client.get_all_points()
 
         # Step 4: Prepare and filter data for Qdrant
-        qdrant_items: list[QdrantDocumentItem] = _prepare_and_filter_data(answers, all_points, zammad_client)
+        qdrant_items: list[QdrantDocumentItem] = _prepare_and_filter_data(answers, all_points, zammad_client, project)
 
         # Step 5: Check for deleted documents
         deleted_answer_ids: list[UUID] = retrieve_deleted_answer_ids(all_points, zammad_client, answer_ids_in_category)
@@ -136,7 +145,10 @@ def run_indexing(
 
 
 def _prepare_and_filter_data(
-    answers: dict[int, KnowledgeBaseAnswer], all_points: list[Record], zammad_client: ZammadAPIClient | ZammadEAIClient
+    answers: dict[int, KnowledgeBaseAnswer],
+    all_points: list[Record],
+    zammad_client: ZammadAPIClient | ZammadEAIClient,
+    project: str | None = None,
 ) -> list[QdrantDocumentItem]:
     """Prepare data for Qdrant and filter for changed documents only.
 
@@ -148,6 +160,7 @@ def _prepare_and_filter_data(
         answers: Dictionary mapping answer IDs to KnowledgeBaseAnswer objects
         all_points: List of all points in the Qdrant collection
         zammad_client: Zammad API client instance
+        project: Project key stored with every vector, or None outside multi-project mode
 
     Returns:
         List of QdrantDocumentItem objects ready for indexing, containing only
@@ -158,6 +171,7 @@ def _prepare_and_filter_data(
     qdrant_data: list[QdrantDocumentItem] = prepare_qdrant_data(
         answers=answers,
         client=zammad_client,
+        project=project,
     )
     logger.info("Prepared data for %d answers for Qdrant indexing.", len(qdrant_data))
 
@@ -240,8 +254,10 @@ def cleanup(zammad_client, qdrant_client) -> None:
         logger.warning("Cleanup finished with %d error(s).", len(cleanup_errors))
 
 
-def main() -> None:
-    """Run the index job once using the configured Zammad and Qdrant clients."""
+def _index_single() -> None:
+    """Index the whole configured KB (or its category_ids) into the configured collection, as before projects."""
+    zammad_client: ZammadAPIClient | ZammadEAIClient | None = None
+    qdrant_client: QdrantKBClient | None = None
     try:
         # Initialize Zammad client based on configuration
         if isinstance(settings.zammad, ZammadAPISettings):
@@ -253,16 +269,10 @@ def main() -> None:
         else:
             raise ValueError(f"Unsupported Zammad client type: {settings.zammad.type}")
 
-        # Initialize Qdrant client
-        qdrant_client: QdrantKBClient = QdrantKBClient(
-            settings,
-        )
+        qdrant_client = QdrantKBClient(settings)
         logger.info("Initialized Qdrant client")
 
-        # Optional: Ingest configured laws into the same collection before KB indexing
-        # Create a single Qdrant snapshot before any writes (laws + KB) so we can
-        # roll back in case of failure. This avoids creating one snapshot per
-        # law which is unnecessary and can be slow.
+        # Create a single Qdrant snapshot before any writes (laws + KB), so a failure can be rolled back.
         snapshot_created = False
         if settings.laws:
             logger.info("Creating Qdrant snapshot before law ingestion")
@@ -276,14 +286,126 @@ def main() -> None:
                 ingest_law(law, qdrant_client)
             logger.info("Completed law ingestion stage")
 
-        # Run the indexing process. If we already created a snapshot above we
-        # tell run_indexing to skip creating another one.
         run_indexing(qdrant_client, zammad_client, snapshot_already_created=snapshot_created)
+    finally:
+        cleanup(zammad_client, qdrant_client)
+
+
+def _api_settings() -> ZammadAPISettings:
+    if not isinstance(settings.zammad, ZammadAPISettings):
+        raise ValueError("Projects and the docs sync need zammad.type: api")
+    return settings.zammad
+
+
+def _load_projects() -> dict[str, ProjectConfig]:
+    if settings.projects_dir is None:
+        raise ValueError("projects_dir (ZAMMAD_AI_PROJECTS_DIR) is required for projects")
+    projects = load_projects(settings.projects_dir)
+    if settings.project is not None and settings.project not in projects:
+        raise ValueError(f"Unknown project {settings.project!r}; known: {', '.join(projects) or 'none'}")
+    return projects
+
+
+def _root_category_id(project: ProjectConfig) -> int:
+    reader = KBWriter(_api_settings(), _api_settings().auth_token)
+    try:
+        tree = reader.read_tree()
+        return next(
+            c.id for c in tree.categories.values() if c.parent_id is None and c.title == project.kb.root_category
+        )
+    except StopIteration:
+        raise ValueError(
+            f"KB category {project.kb.root_category!r} of project {project.key} does not exist; run sync-docs first"
+        ) from None
+    finally:
+        reader.client.close()
+
+
+def index_project(project: ProjectConfig) -> None:
+    """Index one project's KB category tree into its own Qdrant collection."""
+    root_id = _root_category_id(project)
+    project_settings = settings.model_copy(
+        update={"qdrant": settings.qdrant.model_copy(update={"collection_name": project.qdrant.collection_name})}
+    )
+    if ensure_collection(project_settings.qdrant):
+        logger.info(f"Created Qdrant collection {project.qdrant.collection_name} for project {project.key}")
+    zammad_client = ZammadAPIClient(_api_settings())
+    qdrant_client: QdrantKBClient | None = None
+    try:
+        qdrant_client = QdrantKBClient(project_settings)
+        qdrant_client.ensure_project_index()
+        logger.info(f"Indexing project {project.key} (category {root_id}) into {project.qdrant.collection_name}")
+        run_indexing(qdrant_client, zammad_client, category_ids=[root_id], project=project.key)
+    finally:
+        cleanup(zammad_client, qdrant_client)
+
+
+def sync_project_docs(project: ProjectConfig) -> None:
+    """Sync a project's docs repo into its KB category tree, then index it when asked and something changed."""
+    if project.docs is None:
+        raise ValueError(f"Project {project.key} has no docs repository to sync")
+    if settings.docs_github_token is None or settings.kb_editor_token is None:
+        raise ValueError("sync-docs needs ZAMMAD_AI_DOCS_GITHUB_TOKEN and ZAMMAD_AI_KB_EDITOR_TOKEN")
+    writer = KBWriter(_api_settings(), settings.kb_editor_token)
+    try:
+        with checkout(project.docs.repo, project.docs.branch, settings.docs_github_token) as (root, sha):
+            logger.info(f"Syncing {project.docs.repo}@{sha} into KB category {project.kb.root_category!r}")
+            plan = build_plan(project, root)
+        result = sync_docs(
+            plan,
+            root_title=project.kb.root_category,
+            writer=writer,
+            state_file=settings.sync_state_dir / f"{project.key}.json",
+            dry_run=settings.dry_run,
+        )
+    finally:
+        writer.client.close()
+    prefix = "Would " if settings.dry_run else ""
+    for action, subject in result.actions:
+        if action != "unchanged":
+            logger.info(f"{prefix}{action}: {subject}")
+    summary = ", ".join(f"{count} {action}" for action, count in sorted(result.counts.items())) or "nothing"
+    logger.info(f"Docs sync for {project.key} at {sha}{' (dry run)' if settings.dry_run else ''}: {summary}")
+    if settings.then_index and not settings.dry_run:
+        if result.changed:
+            index_project(project)
+        else:
+            logger.info(f"KB of project {project.key} unchanged; skipping indexing")
+
+
+def archive_manual_category() -> None:
+    """Archive every answer in archive_category_id, to retire hand-written answers the docs now provide."""
+    if settings.archive_category_id is None or settings.kb_editor_token is None:
+        raise ValueError("archive-category needs archive_category_id and ZAMMAD_AI_KB_EDITOR_TOKEN")
+    writer = KBWriter(_api_settings(), settings.kb_editor_token)
+    try:
+        result = archive_category(settings.archive_category_id, writer=writer, dry_run=settings.dry_run)
+    finally:
+        writer.client.close()
+    for _, title in result.actions:
+        logger.info(f"{'Would archive' if settings.dry_run else 'Archived'}: {title}")
+    logger.info(f"Archived {len(result.actions)} answer(s) in category {settings.archive_category_id}")
+
+
+def main() -> None:
+    """Run one command: index (default), sync-docs or archive-category."""
+    try:
+        if settings.command == "sync-docs":
+            projects = _load_projects()
+            if settings.project is None:
+                raise ValueError("sync-docs needs --project")
+            sync_project_docs(projects[settings.project])
+        elif settings.command == "archive-category":
+            archive_manual_category()
+        elif settings.projects_dir is None:
+            _index_single()
+        else:
+            projects = _load_projects()
+            for key in [settings.project] if settings.project else list(projects):
+                index_project(projects[key])
     except Exception:
         getLogger("zammad-ai-index").error("Application encountered a critical error", exc_info=True)
         raise
-    finally:
-        cleanup(zammad_client, qdrant_client)
 
 
 if __name__ == "__main__":

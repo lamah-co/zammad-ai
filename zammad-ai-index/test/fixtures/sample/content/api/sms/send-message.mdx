@@ -1,0 +1,31 @@
+---
+title: Send Message
+description: Test fixture for an API reference page
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+## Endpoint
+
+```
+POST /api/example/messages
+```
+
+## Request body
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `text` | string | Yes | Message text |
+| `to` | string | Yes | Recipient |
+
+## Example
+
+```python
+import requests
+
+requests.post("https://example.test/api/example/messages", json={"text": "hi", "to": "1"})
+```
+
+<Callout type="info">
+  This page is a test fixture, not real documentation.
+</Callout>

@@ -12,7 +12,7 @@ from qdrant_client import QdrantClient
 from qdrant_client.http.exceptions import ApiException
 from qdrant_client.http.models import CollectionInfo
 from qdrant_client.http.models.models import Record
-from qdrant_client.models import SnapshotDescription
+from qdrant_client.models import Distance, PayloadSchemaType, SnapshotDescription, VectorParams
 
 from job.models.qdrant import QdrantDocumentItem
 from job.settings.genai import GenAISettings
@@ -31,6 +31,27 @@ class QdrantKBError(Exception):
     """Custom exception for Qdrant-related errors."""
 
     ...
+
+
+def ensure_collection(qdrant_settings: QdrantSettings) -> bool:
+    """Create the collection with the configured dimension if it does not exist. Returns whether it was created."""
+    client = QdrantClient(
+        url=qdrant_settings.url.encoded_string(),
+        port=None,
+        timeout=qdrant_settings.timeout,
+        api_key=qdrant_settings.api_key.get_secret_value() if qdrant_settings.api_key else None,
+    )
+    try:
+        if client.collection_exists(collection_name=qdrant_settings.collection_name):
+            return False
+        vectors = VectorParams(size=qdrant_settings.vector_dimension, distance=Distance.COSINE)
+        client.create_collection(
+            collection_name=qdrant_settings.collection_name,
+            vectors_config={qdrant_settings.vector_name: vectors} if qdrant_settings.vector_name else vectors,
+        )
+        return True
+    finally:
+        client.close()
 
 
 class QdrantKBClient:
@@ -98,6 +119,14 @@ class QdrantKBClient:
         self.retriever: VectorStoreRetriever = self.vectorstore.as_retriever(
             search_type="similarity",
             search_kwargs={"k": self.qdrant_settings.retrieval_num_documents},
+        )
+
+    def ensure_project_index(self) -> None:
+        """Index metadata.project as a keyword, so retrieval can filter a project's answers cheaply. Idempotent."""
+        self.client.create_payload_index(
+            collection_name=self.collection_name,
+            field_name="metadata.project",
+            field_schema=PayloadSchemaType.KEYWORD,
         )
 
     def create_snapshot(self) -> bool:

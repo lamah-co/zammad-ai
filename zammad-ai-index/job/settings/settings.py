@@ -1,9 +1,10 @@
 """Top-level settings for the Zammad AI index job."""
 
 from functools import lru_cache
+from pathlib import Path
 from typing import Literal
 
-from pydantic import Field, model_validator
+from pydantic import Field, PositiveInt, SecretStr, model_validator
 from pydantic_settings import (
     BaseSettings,
     CliSettingsSource,
@@ -93,6 +94,29 @@ class ZammadAIIndexSettings(BaseSettings):
     mode: Literal["production", "development", "unittest"] = Field(
         description="Application mode, affecting logging and other behavior.",
         default="production",
+    )
+
+    # Projects and the docs sync
+    command: Literal["index", "sync-docs", "archive-category"] = Field(
+        default="index",
+        description="index: index the KB into Qdrant. sync-docs: sync a project's docs repo into the KB. "
+        "archive-category: archive every answer in archive_category_id.",
+    )
+    projects_dir: Path | None = Field(
+        default=None,
+        description="Folder of project files (<key>.yaml). When set, each project is indexed into its own collection.",
+    )
+    project: str | None = Field(default=None, description="Project key to sync or index; index without it does all.")
+    dry_run: bool = Field(default=False, description="sync-docs and archive-category: print the plan, write nothing.")
+    then_index: bool = Field(default=False, description="sync-docs: index the project afterwards when the KB changed.")
+    archive_category_id: PositiveInt | None = Field(default=None, description="archive-category: category to archive.")
+    sync_state_dir: Path = Field(
+        default=Path("/var/lib/zammad-ai-index"),
+        description="Where the sync keeps content hashes per project, to skip unchanged answers.",
+    )
+    docs_github_token: SecretStr | None = Field(default=None, description="Read-only GitHub token for docs repos.")
+    kb_editor_token: SecretStr | None = Field(
+        default=None, description="Zammad token with the knowledge_base.editor permission, used only by the sync."
     )
 
     model_config = SettingsConfigDict(
