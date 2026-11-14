@@ -148,6 +148,10 @@ class QdrantSettings(BaseModel):
         description="The number of relevant documents to retrieve for each search query.",
         default=5,
     )
+    project: str | None = Field(
+        default=None,
+        description="Only retrieve vectors whose metadata.project is this key. Set per project, not in config.",
+    )
 
 
 class LawToolSettings(BaseModel):

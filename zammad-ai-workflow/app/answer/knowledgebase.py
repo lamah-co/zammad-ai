@@ -175,6 +175,16 @@ class QdrantKBClient:
         set_provider_ready(True)
         return True
 
+    def _scoped(self, search_filter: Filter | None) -> Filter | None:
+        """Add the project restriction, so a project never retrieves another project's vectors."""
+        project = getattr(self.qdrant_settings, "project", None)
+        if not isinstance(project, str):
+            return search_filter
+        condition = FieldCondition(key="metadata.project", match=MatchValue(value=project))
+        if search_filter is None:
+            return Filter(must=[condition])
+        return Filter(must=[condition, search_filter])
+
     async def asearch_documents(
         self,
         query: str,
@@ -199,7 +209,7 @@ class QdrantKBClient:
             query=query,
             k=k,
             offset=offset,
-            filter=search_filter,
+            filter=self._scoped(search_filter),
         )
         record_retrieved_documents(document for document, _ in results)
         return results
@@ -249,7 +259,7 @@ class QdrantKBClient:
             query=query,
             k=k,
             offset=offset,
-            filter=search_filter,
+            filter=self._scoped(search_filter),
         )
 
     async def close(self) -> None:

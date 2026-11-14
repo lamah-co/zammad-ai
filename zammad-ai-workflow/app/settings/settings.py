@@ -1,6 +1,7 @@
 """Application settings and configuration source loading."""
 
 from functools import lru_cache
+from pathlib import Path
 from typing import Literal
 
 from pydantic import Field, PositiveInt, model_validator
@@ -162,6 +163,11 @@ class ZammadAISettings(BaseSettings):
     conversation: ConversationSettings = Field(
         description="Settings for answering ticket conversations turn by turn.",
         default_factory=lambda: ConversationSettings(),
+    )
+    projects_dir: Path | None = Field(
+        default=None,
+        description="Folder of project files (<key>.yaml). Each project answers from its own collection, selected by "
+        "the event's request type; other request types use the settings above.",
     )
     preparser: "PreparserSettings" = Field(
         description="Settings for optional message preparsing before LLM processing.",

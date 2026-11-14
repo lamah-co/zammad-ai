@@ -29,6 +29,7 @@ from app.errors import AckDecision, ExceptionDecision, KafkaPayloadError, classi
 from app.models.kafka import Event
 from app.models.triage import TriageResult
 from app.models.zammad import ZammadTicket
+from app.projects import build_project_actions
 from app.settings import ZammadAISettings
 from app.settings.conversation import ConversationSettings
 from app.settings.kafka import KafkaRetrySettings
@@ -122,6 +123,8 @@ def build_router(settings: ZammadAISettings) -> tuple[KafkaRouter, Callable]:
     triage_service: TriageService = get_triage_service(settings=settings)
     answer_service: AnswerService = get_answer_service(settings=settings)
     action_service: ActionService = get_action_service(settings=settings, answer_service=answer_service)
+    # Projects answer from their own collections; other request types use the shared services above.
+    project_actions: dict[str, ActionService] = build_project_actions(settings)
 
     retry: KafkaRetrySettings = settings.kafka.retry
     conversation: ConversationSettings = settings.conversation
@@ -137,7 +140,7 @@ def build_router(settings: ZammadAISettings) -> tuple[KafkaRouter, Callable]:
         if tag
     )
 
-    async def process_ticket(ticket_id: int) -> None:
+    async def process_ticket(ticket_id: int, action: ActionService) -> None:
         """Triage one ticket and execute its action. Errors propagate to the retry loop."""
         # Get ticket details from Zammad
         try:
@@ -183,7 +186,11 @@ def build_router(settings: ZammadAISettings) -> tuple[KafkaRouter, Callable]:
                 logger.info(
                     f"Ticket {ticket_id}: waiting {readiness.wait_seconds:.1f}s for the customer to finish the turn."
                 )
-                rechecks.schedule(ticket_id, readiness.wait_seconds + RECHECK_MARGIN_SECONDS, recheck)
+                rechecks.schedule(
+                    ticket_id,
+                    readiness.wait_seconds + RECHECK_MARGIN_SECONDS,
+                    lambda tid: recheck(tid, action),
+                )
                 return
             if readiness.after_cap:
                 TURNS_ANSWERED_AFTER_CAP_TOTAL.inc()
@@ -223,12 +230,10 @@ def build_router(settings: ZammadAISettings) -> tuple[KafkaRouter, Callable]:
         try:
             if turn is None:
                 result: TriageResult = await triage_service.perform_triage(ticket=ticket)
-                await action_service.execute_action(ticket_id=ticket_id, triage=result)
+                await action.execute_action(ticket_id=ticket_id, triage=result)
             else:
                 result = await triage_service.perform_triage(ticket=ticket, turn=turn.articles)
-                await action_service.execute_action(
-                    ticket_id=ticket_id, triage=result, answered_through=turn.newest_article_id
-                )
+                await action.execute_action(ticket_id=ticket_id, triage=result, answered_through=turn.newest_article_id)
                 if conversation.resume_tag in ticket.tags:
                     await zammad_client.remove_tag_from_ticket(ticket_id=ticket_id, tag=conversation.resume_tag)
             logger.debug(
@@ -247,14 +252,14 @@ def build_router(settings: ZammadAISettings) -> tuple[KafkaRouter, Callable]:
                         retryable=True,
                     ) from e
 
-    async def hand_off(ticket_id: int, decision: ExceptionDecision, attempts: int) -> None:
+    async def hand_off(ticket_id: int, decision: ExceptionDecision, attempts: int, action: ActionService) -> None:
         """Hand the ticket to a human. Keep the event only while Zammad is unreachable."""
         try:
             reason = f"{decision.error_class} after {attempts} attempt(s)"
             if conversation.enabled:
                 ticket: ZammadTicket = await triage_service.zammad_client.get_ticket_with_context(id=ticket_id)
                 articles = unanswered_turn(ticket)
-                handed_off: bool = await action_service.hand_off_failed_ticket(
+                handed_off: bool = await action.hand_off_failed_ticket(
                     ticket_id=ticket_id,
                     reason=reason,
                     customer_message=turn_text(articles) if articles else "",
@@ -263,7 +268,7 @@ def build_router(settings: ZammadAISettings) -> tuple[KafkaRouter, Callable]:
             else:
                 ticket = await triage_service.zammad_client.get_ticket(id=ticket_id)
                 article = ticket.latest_customer_article()
-                handed_off = await action_service.hand_off_failed_ticket(
+                handed_off = await action.hand_off_failed_ticket(
                     ticket_id=ticket_id,
                     reason=reason,
                     customer_message=article.text if article else "",
@@ -283,14 +288,14 @@ def build_router(settings: ZammadAISettings) -> tuple[KafkaRouter, Callable]:
             logger.error(f"Hand-off failed for ticket {ticket_id}; acknowledging the event.", exc_info=True)
             raise AckMessage() from e
 
-    async def run_ticket(ticket_id: int) -> None:
+    async def run_ticket(ticket_id: int, action: ActionService) -> None:
         """Process the ticket with retries and a final hand-off. Always ends in AckMessage or NackMessage."""
         async with rechecks.ticket_lock(ticket_id):
             attempt = 0
             while True:
                 attempt += 1
                 try:
-                    await process_ticket(ticket_id)
+                    await process_ticket(ticket_id, action)
                 except AckMessage, NackMessage:
                     raise
                 except Exception as e:
@@ -317,21 +322,21 @@ def build_router(settings: ZammadAISettings) -> tuple[KafkaRouter, Callable]:
                         await asyncio.sleep(retry.backoff_seconds(attempt))
                         continue
                     EVENT_HANDOFFS_TOTAL.labels(reason=decision.error_class).inc()
-                    await hand_off(ticket_id, decision, attempt)
+                    await hand_off(ticket_id, decision, attempt, action)
                     raise AckMessage() from e
                 raise AckMessage()
 
-    async def recheck(ticket_id: int) -> None:
+    async def recheck(ticket_id: int, action: ActionService) -> None:
         """Process a ticket whose turn was not quiet yet, outside any Kafka event."""
         async with track_activity():
             logger.info(f"Re-checking ticket {ticket_id} after its quiet period.")
             try:
-                await run_ticket(ticket_id)
+                await run_ticket(ticket_id, action)
             except AckMessage:
                 pass
             except NackMessage:
                 # Zammad was unreachable; there is no event to redeliver, so try again later.
-                rechecks.schedule(ticket_id, retry.max_backoff_seconds, recheck)
+                rechecks.schedule(ticket_id, retry.max_backoff_seconds, lambda tid: recheck(tid, action))
 
     @router.subscriber(
         settings.kafka.topic,
@@ -375,6 +380,6 @@ def build_router(settings: ZammadAISettings) -> tuple[KafkaRouter, Callable]:
                 logger.error(f"Kafka event has an invalid ticket id: {parsed_event.ticket!r}", exc_info=True)
                 raise AckMessage() from e
 
-            await run_ticket(ticket_id)
+            await run_ticket(ticket_id, project_actions.get(parsed_event.request_type, action_service))
 
     return router, event_handler
