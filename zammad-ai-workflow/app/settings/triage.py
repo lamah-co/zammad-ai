@@ -63,6 +63,10 @@ class TriageSettings(BaseModel):
         default="ai_failed",
         description="Tag added when processing fails permanently and the ticket is handed off.",
     )
+    draft_tag: str | None = Field(
+        default="ai_draft",
+        description="Tag added when an answer is saved as a shared draft for an agent instead of being published.",
+    )
     public_reply_subject: LocalizedText = Field(
         default_factory=lambda: {"ar": "الرد على طلبك", "en": "Answer"},
         description="Subject of static customer replies and handoff acknowledgements, per language.",

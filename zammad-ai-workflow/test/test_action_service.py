@@ -20,7 +20,7 @@ async def test_unsupported_reply_channel_becomes_shared_draft() -> None:
     """Unsupported customer channels must fall back to a shared draft."""
     service = object.__new__(ActionService)
     service.settings = SimpleNamespace(
-        triage=SimpleNamespace(public_reply_subject="Answer"),
+        triage=SimpleNamespace(public_reply_subject="Answer", draft_tag="ai_draft"),
         zammad=SimpleNamespace(pending_close_after_days=None),
         localization=LocalizationSettings(),
     )
@@ -28,6 +28,7 @@ async def test_unsupported_reply_channel_becomes_shared_draft() -> None:
     service.zammad_client = SimpleNamespace(
         post_answer=AsyncMock(side_effect=UnsupportedReplyChannelError("unsupported web channel")),
         post_shared_draft=AsyncMock(),
+        add_tag_to_ticket=AsyncMock(),
     )
     triage = TriageResult(
         user_text="Help",
@@ -45,6 +46,9 @@ async def test_unsupported_reply_channel_becomes_shared_draft() -> None:
     await service.execute_action(ticket_id=42, triage=triage)
 
     service.zammad_client.post_shared_draft.assert_awaited_once_with(ticket_id=42, text="A reviewed answer")
+    # No acknowledgement: it can't be delivered on this channel either, and channels are never switched.
+    service.zammad_client.post_answer.assert_awaited_once()
+    service.zammad_client.add_tag_to_ticket.assert_awaited_once_with(ticket_id=42, tag="ai_draft")
 
 
 @pytest.mark.asyncio

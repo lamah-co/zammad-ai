@@ -18,6 +18,7 @@ class RecordingZammadClient:
         """Start with no recorded writes."""
         self.answers: list[dict[str, object]] = []
         self.shared_drafts: list[dict[str, object]] = []
+        self.tags: list[str] = []
 
     async def post_answer(
         self,
@@ -39,6 +40,10 @@ class RecordingZammadClient:
     async def post_shared_draft(self, ticket_id: int, text: str) -> None:
         """Record a shared draft."""
         self.shared_drafts.append({"ticket_id": ticket_id, "text": text})
+
+    async def add_tag_to_ticket(self, ticket_id: int, tag: str) -> None:
+        """Record a tag."""
+        self.tags.append(tag)
 
     async def close(self) -> None:
         """Satisfy the client interface."""
@@ -161,3 +166,4 @@ async def test_gemini_moderation_blocks_auto_publish_for_ai_answer(settings_fact
     assert service.zammad_client.answers == []
     assert len(service.zammad_client.shared_drafts) == 1
     assert service.zammad_client.shared_drafts[0]["ticket_id"] == 123
+    assert service.zammad_client.tags == ["ai_draft"]

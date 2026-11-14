@@ -179,6 +179,8 @@ answer:
       type: "file" # Options: "string", "file", "langfuse"
       prompt: "prompts/answer/repair.prompt.md"
     max_repairs: 0
+    max_documents: 10 # retrieved documents the judge checks the answer against
+    max_document_chars: 4000 # each document is cut to this length for the judge
   ai_answer_disclaimer: "" # Optional: disclaimer text for AI-generated answers
 
 # ============================================================================
@@ -227,6 +229,17 @@ max_user_text_length: 2000
 # recursion_limit: 30
 
 # ============================================================================
+# Conversation Configuration
+# ============================================================================
+# Answer each unanswered customer turn once, and stay out once a person is involved.
+# Requires zammad.type: api and the ai_answered_through_article_id ticket attribute.
+conversation:
+  enabled: true
+  resume_tag: ai_resume # an agent adds this tag to hand a ticket back to the AI
+  quiet_seconds: 10 # answer once the newest customer message is this old; 0 answers at once
+  max_wait_seconds: 60 # answer at the latest this long after the turn's first message
+
+# ============================================================================
 # Localization Configuration
 # ============================================================================
 localization:
@@ -262,6 +275,7 @@ triage:
   #   en: "Your request has been received. A team member will follow up with you as soon as possible."
   # human_review_internal_note: "Human review for {category}: {reason}"
   # human_review_tag: ai_human_review
+  # draft_tag: ai_draft # answer saved as a draft; the customer gets human_review_public_fallback
   # handoff_ticket_state: open
   # Category setup: Define the categories for ticket classification
   # Each category requires only a unique name.
