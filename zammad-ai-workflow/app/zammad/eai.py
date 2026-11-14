@@ -140,8 +140,15 @@ class ZammadEAIClient(BaseZammadClient):
 
     @override
     async def post_answer(
-        self, ticket_id: int, text: str, subject: str | None = None, internal: bool = False
+        self,
+        ticket_id: int,
+        text: str,
+        subject: str | None = None,
+        internal: bool = False,
+        answered_through: int | None = None,
     ) -> int | None:
+        if answered_through is not None:
+            raise NotImplementedError("The EAI client cannot record the answered-through marker")
         payload = ZammadAnswer(
             ticket_id=ticket_id,
             body=text,

@@ -1,6 +1,6 @@
 """Select a ticket's unanswered customer turn and decide whether the AI may answer it."""
 
-from collections.abc import Collection
+from collections.abc import Collection, Sequence
 from dataclasses import dataclass
 
 from app.models.zammad import ZammadArticle, ZammadTicket
@@ -25,6 +25,21 @@ class TurnDecision:
     def newest_article_id(self) -> int | None:
         """Return the ID of the newest message in the turn."""
         return self.articles[-1].id if self.articles else None
+
+
+# Tells triage and the answer model that a burst is one request, so a greeting next to a question isn't small talk.
+BURST_PREAMBLE = (
+    "The customer sent these messages in a row, oldest first. Read them together as one request. "
+    "Greetings, thanks and test messages are not the request when another message asks for something."
+)
+
+
+def turn_text(articles: Sequence[ZammadArticle]) -> str:
+    """Return the text the AI answers: a single message as is, several as a numbered list, oldest first."""
+    if len(articles) == 1:
+        return articles[0].text
+    lines = "\n".join(f"{number}. {article.text}" for number, article in enumerate(articles, start=1))
+    return f"{BURST_PREAMBLE}\n{lines}"
 
 
 def is_customer_message(article: ZammadArticle) -> bool:

@@ -26,6 +26,7 @@ from app.settings import (
     ZammadAISettings,
     ZammadAPISettings,
 )
+from app.settings.conversation import ConversationSettings
 from app.settings.kafka import EventProcessingSettings
 from app.settings.triage import Action, ActionRule, ActionTypes, Category, StringTriagePrompts
 from test.fakes import FakeGenAIHandler, FakeLangfuseClient, FakeZammadClient
@@ -110,6 +111,8 @@ def base_settings() -> ZammadAISettings:
     """Provide one minimal valid settings object for reuse across tests."""
     return ZammadAISettings.model_construct(
         mode="unittest",
+        # Tests of the single-pass flow; the conversation flow has its own tests in test_reconcile.py.
+        conversation=ConversationSettings(enabled=False),
         langfuse_enabled=False,
         genai=GenAIOpenAISettings(),
         zammad=ZammadAPISettings(

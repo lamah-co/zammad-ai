@@ -14,11 +14,13 @@ from pydantic import ValidationError
 
 from app.action.service import ActionService, get_action_service
 from app.answer.service import AnswerService, get_answer_service
+from app.conversation.turn import TurnDecision, decide_turn, turn_text, unanswered_turn
 from app.errors import AckDecision, ExceptionDecision, KafkaPayloadError, classify_exception
 from app.models.kafka import Event
 from app.models.triage import TriageResult
 from app.models.zammad import ZammadTicket
 from app.settings import ZammadAISettings
+from app.settings.conversation import ConversationSettings
 from app.settings.kafka import KafkaRetrySettings
 from app.triage.triage import TriageService, get_triage_service
 from app.utils.logging import getLogger
@@ -37,6 +39,11 @@ EVENT_RETRIES_TOTAL = Counter(
 EVENT_HANDOFFS_TOTAL = Counter(
     name="zammad_ai_event_handoffs_total",
     documentation="Ticket events handed to a human after the retry budget ran out or a person was required.",
+    labelnames=("reason",),
+)
+TURNS_SKIPPED_TOTAL = Counter(
+    name="zammad_ai_turns_skipped_total",
+    documentation="Ticket events that needed no answer: nothing new since the last answer, or a person owns the conversation.",
     labelnames=("reason",),
 )
 EVENT_HANDOFF_FAILURES_TOTAL = Counter(
@@ -79,19 +86,47 @@ def build_router(settings: ZammadAISettings) -> tuple[KafkaRouter, Callable]:
     action_service: ActionService = get_action_service(settings=settings, answer_service=answer_service)
 
     retry: KafkaRetrySettings = settings.kafka.retry
+    conversation: ConversationSettings = settings.conversation
+    handoff_tags: tuple[str, ...] = tuple(
+        tag
+        for tag in (settings.triage.human_review_tag, settings.triage.no_answer_tag, settings.triage.failed_tag)
+        if tag
+    )
 
     async def process_ticket(ticket_id: int) -> None:
         """Triage one ticket and execute its action. Errors propagate to the retry loop."""
         # Get ticket details from Zammad
         try:
             zammad_client: BaseZammadClient = triage_service.zammad_client
-            ticket: ZammadTicket = await zammad_client.get_ticket(id=ticket_id)
+            ticket: ZammadTicket = (
+                await zammad_client.get_ticket_with_context(id=ticket_id)
+                if conversation.enabled
+                else await zammad_client.get_ticket(id=ticket_id)
+            )
         except TicketNotFoundError as e:
             logger.info(f"Ticket {ticket_id} does not exist anymore.", exc_info=True)
             raise KafkaPayloadError("Ticket was not found", retryable=False) from e
         except (ZammadRetryableError, ZammadConnectionError) as e:
             logger.error("Error connecting to Zammad", exc_info=True)
             raise KafkaPayloadError("Failed due to Zammad connection error", retryable=True) from e
+
+        # Answer only the unanswered turn, and only while no person owns the conversation.
+        turn: TurnDecision | None = None
+        if conversation.enabled:
+            turn = decide_turn(
+                ticket,
+                ai_user_id=await zammad_client.get_own_user_id(),
+                handoff_tags=handoff_tags,
+                resume_tag=conversation.resume_tag,
+            )
+            if not turn.articles:
+                TURNS_SKIPPED_TOTAL.labels(reason="nothing_new").inc()
+                logger.info(f"Ticket {ticket_id} has no unanswered customer message; skipping the event.")
+                return
+            if turn.blocked_by is not None:
+                TURNS_SKIPPED_TOTAL.labels(reason="person_involved").inc()
+                logger.info(f"Ticket {ticket_id} is with a person ({turn.blocked_by}); not answering.")
+                return
 
         # Store the original group ID
         original_group_id: int | None = ticket.group_id
@@ -119,11 +154,19 @@ def build_router(settings: ZammadAISettings) -> tuple[KafkaRouter, Callable]:
 
         # Perform triage and execute corresponding actions
         try:
-            result: TriageResult = await triage_service.perform_triage(ticket=ticket)
+            if turn is None:
+                result: TriageResult = await triage_service.perform_triage(ticket=ticket)
+                await action_service.execute_action(ticket_id=ticket_id, triage=result)
+            else:
+                result = await triage_service.perform_triage(ticket=ticket, turn=turn.articles)
+                await action_service.execute_action(
+                    ticket_id=ticket_id, triage=result, answered_through=turn.newest_article_id
+                )
+                if conversation.resume_tag in ticket.tags:
+                    await zammad_client.remove_tag_from_ticket(ticket_id=ticket_id, tag=conversation.resume_tag)
             logger.debug(
                 f"Triage result for ticket {ticket_id}: category: {result.category.name}, action: {result.action.name}"
             )
-            await action_service.execute_action(ticket_id=ticket_id, triage=result)
         # Move ticket back to original group if it was moved to AI group
         finally:
             if original_group_id is not None:
@@ -140,13 +183,24 @@ def build_router(settings: ZammadAISettings) -> tuple[KafkaRouter, Callable]:
     async def hand_off(ticket_id: int, decision: ExceptionDecision, attempts: int) -> None:
         """Hand the ticket to a human. Keep the event only while Zammad is unreachable."""
         try:
-            ticket: ZammadTicket = await triage_service.zammad_client.get_ticket(id=ticket_id)
-            article = ticket.latest_customer_article()
-            handed_off: bool = await action_service.hand_off_failed_ticket(
-                ticket_id=ticket_id,
-                reason=f"{decision.error_class} after {attempts} attempt(s)",
-                customer_message=article.text if article else "",
-            )
+            reason = f"{decision.error_class} after {attempts} attempt(s)"
+            if conversation.enabled:
+                ticket: ZammadTicket = await triage_service.zammad_client.get_ticket_with_context(id=ticket_id)
+                articles = unanswered_turn(ticket)
+                handed_off: bool = await action_service.hand_off_failed_ticket(
+                    ticket_id=ticket_id,
+                    reason=reason,
+                    customer_message=turn_text(articles) if articles else "",
+                    answered_through=articles[-1].id if articles else None,
+                )
+            else:
+                ticket = await triage_service.zammad_client.get_ticket(id=ticket_id)
+                article = ticket.latest_customer_article()
+                handed_off = await action_service.hand_off_failed_ticket(
+                    ticket_id=ticket_id,
+                    reason=reason,
+                    customer_message=article.text if article else "",
+                )
             if handed_off:
                 logger.warning(f"Handed off ticket {ticket_id} after {attempts} attempt(s): {decision.error_class}")
         except TicketNotFoundError as e:

@@ -1,5 +1,6 @@
 """Core triage service for ticket categorization and action selection."""
 
+from collections.abc import Sequence
 from datetime import datetime
 from time import perf_counter
 
@@ -7,6 +8,7 @@ from dotenv import load_dotenv
 from prometheus_client import Gauge, Histogram
 from truststore import inject_into_ssl
 
+from app.conversation.turn import turn_text
 from app.errors import (
     GenAIError,
     TriageCategoryWrongError,
@@ -23,7 +25,7 @@ from app.models.triage import (
     ProcessingIdResponse,
     TriageResult,
 )
-from app.models.zammad import ArticleAttachment, ZammadTicket
+from app.models.zammad import ArticleAttachment, ZammadArticle, ZammadTicket
 from app.moderation import GeminiModerationService, get_moderation_service
 from app.preparser.service import PreparserService, get_preparser_service
 from app.settings import ZammadAISettings
@@ -168,11 +170,13 @@ class TriageService:
 
         logger.info("Triage initialized successfully.")
 
-    async def perform_triage(self, ticket: ZammadTicket) -> TriageResult:
+    async def perform_triage(self, ticket: ZammadTicket, turn: Sequence[ZammadArticle] | None = None) -> TriageResult:
         """Triage a Zammad ticket by analyzing its customer message to determine category, action, and any extracted values.
 
         Parameters:
             ticket (ZammadTicket): The Zammad ticket to triage.
+            turn (Sequence[ZammadArticle] | None): Unanswered customer messages to answer together. Defaults to the
+                newest customer message.
 
         Returns:
             TriageResult: Result containing the resolved category, selected action, human-readable reasoning, confidence score, and any extracted values (or `None`).
@@ -203,11 +207,12 @@ class TriageService:
                     extracted_values=None,
                 )
 
-            # Step 2: Extract customer message, attachments and generate session ID for Langfuse
-            customer_article = ticket.latest_customer_article()
-            if customer_article is None:
+            # Step 2: Extract the customer turn, its attachments and generate session ID for Langfuse
+            latest = ticket.latest_customer_article()
+            turn_articles: Sequence[ZammadArticle] = turn or ((latest,) if latest is not None else ())
+            if not turn_articles:
                 raise TriageError(f"Ticket {ticket.id} contains no processable article", retryable=False)
-            customer_message: str = customer_article.text
+            customer_message: str = turn_text(turn_articles)
 
             # Run preparser first (may be a no-op when disabled)
             # Important: Preparse BEFORE any truncation to keep behavior consistent
@@ -224,16 +229,18 @@ class TriageService:
                 )
                 customer_message = customer_message[: self.max_user_text_length]
 
-            attachments: list[ArticleAttachment] = customer_article.attachments or []
+            attachments: list[tuple[int, ArticleAttachment]] = [
+                (article.id, attachment) for article in turn_articles for attachment in article.attachments or []
+            ]
             if self.settings.zammad.document_parsing.mode == "off":
                 logger.debug("Document parsing is turned off, skipping attachment content.")
                 customer_message += f"\n\n{len(attachments)} attachments were included."
             else:
-                for attachment in attachments:
+                for article_id, attachment in attachments:
                     try:
                         data: str | None = await self.zammad_client.fetch_ticket_attachment_data(
                             ticket_id=ticket.id,
-                            article_id=customer_article.id,
+                            article_id=article_id,
                             attachment=attachment,
                         )
                     except (ZammadRetryableError, ZammadConnectionError) as e:

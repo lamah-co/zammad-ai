@@ -59,9 +59,28 @@ A ticket is a conversation, answered turn by turn (`app/conversation/turn.py`):
 
 The AI tells its own articles from a human's by the service user's ID, from `GET /api/v1/users/me`. Only the REST client supports this.
 
+### Answering a Turn
+
+With `conversation.enabled` (the default; it requires `zammad.type: api`), a Kafka event only says that a ticket changed. The handler reloads the ticket and works out what it needs:
+
+- **Nothing new** since the marker (a redelivered event, a later event of the same burst, or the AI's own reply): the event is acknowledged and nothing is posted.
+- **A person owns the conversation:** nothing is posted.
+- **Otherwise** the whole turn goes to triage and answering as one request. Several messages are sent as a numbered list, with a note that greetings are not the request when another message asks something.
+
+Every outcome records the turn's newest article in `ai_answered_through_article_id`:
+
+- A public answer or hand-off acknowledgement writes the reply and the marker in one `PUT /api/v1/tickets/{id}`, so a retry can never post it twice.
+- A shared draft or a hand-off without an acknowledgement writes the marker on its own.
+
+After the AI answers a ticket that carried the resume tag, it removes the tag, and the marker carries the conversation on.
+
+With `conversation.enabled: false`, each event triages the newest customer message once, as before.
+
 ## Known Limits
 
-- **Duplicates:** there is no durable idempotency. A redelivered Kafka message can create a second reply.
+- **Duplicates:** in single-pass mode (`conversation.enabled: false`) there is no durable idempotency, and a redelivered Kafka message can create a second reply.
+- **Hand-off steps:** a hand-off posts its note, acknowledgement and tag as separate requests. If the workflow stops after the acknowledgement and before the tag, the turn counts as handled, so the tag isn't added later.
+- **Bursts in progress:** a turn is answered as soon as its first event is handled. Messages that arrive while it's being answered form the next turn, so a burst can get two replies. The quiet period (#31) addresses this.
 - **Delivery status:** the workflow does not check whether Zammad delivered the article.
 - **Queued messages:** the event does not identify an article, so two messages queued closely together both resolve to the newest one.
 - **EAI client:** only the standard REST client implements channel replies.
