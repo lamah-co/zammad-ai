@@ -104,6 +104,14 @@ class JudgeSettings(BaseModel):
         default=0,
         description="Maximum number of repair passes to attempt after a failed judgment.",
     )
+    max_documents: PositiveInt = Field(
+        default=10,
+        description="Maximum number of retrieved documents the judge sees.",
+    )
+    max_document_chars: PositiveInt = Field(
+        default=4000,
+        description="Each retrieved document is cut to this many characters for the judge.",
+    )
 
 
 class QdrantSettings(BaseModel):

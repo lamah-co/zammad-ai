@@ -179,6 +179,8 @@ answer:
       type: "file" # Options: "string", "file", "langfuse"
       prompt: "prompts/answer/repair.prompt.md"
     max_repairs: 0
+    max_documents: 10 # retrieved documents the judge checks the answer against
+    max_document_chars: 4000 # each document is cut to this length for the judge
   ai_answer_disclaimer: "" # Optional: disclaimer text for AI-generated answers
 
 # ============================================================================

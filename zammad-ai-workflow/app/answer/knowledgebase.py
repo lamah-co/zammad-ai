@@ -21,6 +21,8 @@ from app.utils.genai_provider import get_embedding_model
 from app.utils.logging import getLogger
 from app.utils.status import provider_status, set_provider_ready
 
+from .retrieval import record_retrieved_documents
+
 logger: Logger = getLogger("zammad-ai.answer.knowledgebase")
 
 # Create a consistent namespace UUID for generating vector IDs based on content
@@ -193,12 +195,14 @@ class QdrantKBClient:
         """
         if k is None:
             k = self.qdrant_settings.retrieval_num_documents
-        return await self.vectorstore.asimilarity_search_with_relevance_scores(
+        results = await self.vectorstore.asimilarity_search_with_relevance_scores(
             query=query,
             k=k,
             offset=offset,
             filter=search_filter,
         )
+        record_retrieved_documents(document for document, _ in results)
+        return results
 
     async def asearch_law_documents(
         self,
