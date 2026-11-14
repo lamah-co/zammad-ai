@@ -82,6 +82,7 @@ class BaseZammadClient(ABC):
         text: str,
         subject: str | None = None,
         internal: bool = False,
+        answered_through: int | None = None,
     ) -> int | None:
         """Post an answer to the specified Zammad ticket and return its article ID when available.
 
@@ -90,6 +91,7 @@ class BaseZammadClient(ABC):
             text: Answer content to post.
             subject: Optional subject line for the answer.
             internal: If True, post as an internal note not visible to the customer.
+            answered_through: Newest customer article this public answer covers, written in the same request.
 
         """
         ...
@@ -126,6 +128,24 @@ class BaseZammadClient(ABC):
 
         """
         raise NotImplementedError("This Zammad client cannot identify its own user")
+
+    async def set_answered_through(self, ticket_id: int, article_id: int) -> None:
+        """Record the newest customer article the AI has answered.
+
+        Raises:
+            NotImplementedError: If the client cannot write the ticket marker.
+
+        """
+        raise NotImplementedError("This Zammad client cannot record the answered-through marker")
+
+    async def remove_tag_from_ticket(self, ticket_id: int, tag: str) -> None:
+        """Remove a tag from a ticket.
+
+        Raises:
+            NotImplementedError: If the client cannot remove tags.
+
+        """
+        raise NotImplementedError("This Zammad client cannot remove tags")
 
     async def get_ticket_tags(self, ticket_id: int) -> list[str]:
         """Return the tags of a ticket. Clients that cannot read tags return an empty list.

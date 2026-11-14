@@ -4,7 +4,7 @@ import httpx
 import pytest
 from pydantic import HttpUrl, SecretStr
 
-from app.conversation.turn import decide_turn, takeover_reason, unanswered_turn
+from app.conversation.turn import BURST_PREAMBLE, decide_turn, takeover_reason, turn_text, unanswered_turn
 from app.models.zammad import ZammadArticle, ZammadTicket
 from app.settings.zammad import ZammadAPISettings
 from app.zammad.api import ZammadAPIClient
@@ -159,6 +159,14 @@ def test_ticket_5_from_production_is_left_to_the_human_who_replied() -> None:
     assert [a.id for a in decision.articles] == [160, 162, 164]
     assert decision.blocked_by == "human reply"
     assert not decision.answerable
+
+
+def test_turn_text_keeps_a_single_message_and_numbers_a_burst() -> None:
+    """One message is answered as is; a burst is one numbered request, so a greeting doesn't hide the question."""
+    assert turn_text([customer(1, "اهلا")]) == "اهلا"
+    assert turn_text([customer(1, "Test"), customer(2, "اهلا ، نبي نطلب معرف مرسل"), customer(3, "اهلا")]) == (
+        f"{BURST_PREAMBLE}\n1. Test\n2. اهلا ، نبي نطلب معرف مرسل\n3. اهلا"
+    )
 
 
 @pytest.mark.asyncio

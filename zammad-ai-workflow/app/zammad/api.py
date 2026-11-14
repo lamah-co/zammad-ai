@@ -8,7 +8,7 @@ from typing import Any, override
 
 from pydantic import TypeAdapter, ValidationError
 
-from app.errors import UnsupportedReplyChannelError, ZammadPayloadParseError
+from app.errors import UnsupportedReplyChannelError, ZammadMissingTicketAttributeError, ZammadPayloadParseError
 from app.models.zammad import (
     ArticleAttachment,
     ZammadAnswer,
@@ -24,6 +24,9 @@ from app.utils.logging import getLogger
 from .base import BaseZammadClient
 
 logger: Logger = getLogger("zammad-ai.zammad.api")
+
+# Hidden ticket attribute holding the newest customer article the AI has answered (zammad-infra creates it).
+ANSWERED_THROUGH_ATTRIBUTE = "ai_answered_through_article_id"
 
 
 class ZammadAPIClient(BaseZammadClient):
@@ -59,7 +62,12 @@ class ZammadAPIClient(BaseZammadClient):
 
     @override
     async def post_answer(
-        self, ticket_id: int, text: str, subject: str | None = None, internal: bool = False
+        self,
+        ticket_id: int,
+        text: str,
+        subject: str | None = None,
+        internal: bool = False,
+        answered_through: int | None = None,
     ) -> int | None:
         payload = (
             ZammadAnswer(
@@ -72,11 +80,18 @@ class ZammadAPIClient(BaseZammadClient):
             if internal
             else await self._build_channel_reply(ticket_id=ticket_id, text=text, subject=subject)
         )
-        response = await self._request(
-            "POST",
-            "/api/v1/ticket_articles",
-            json=payload.model_dump(by_alias=True, exclude_none=True),
-        )
+        article: dict[str, Any] = payload.model_dump(by_alias=True, exclude_none=True)
+        if answered_through is not None and not internal:
+            # One request writes the reply and the marker, so a retry can never post the reply twice.
+            article.pop("ticket_id", None)
+            await self._request(
+                "PUT",
+                f"/api/v1/tickets/{ticket_id}",
+                json={"article": article, ANSWERED_THROUGH_ATTRIBUTE: answered_through},
+            )
+            logger.info(f"Posted answer to ticket {ticket_id} covering customer article {answered_through}")
+            return None
+        response = await self._request("POST", "/api/v1/ticket_articles", json=article)
         logger.info(f"Posted answer to ticket {ticket_id}")
         return response.get("id") if isinstance(response, dict) and isinstance(response.get("id"), int) else None
 
@@ -146,11 +161,17 @@ class ZammadAPIClient(BaseZammadClient):
         data = await self._request("GET", f"/api/v1/tickets/{id}")
         if not isinstance(data, dict):
             raise ZammadPayloadParseError(f"Invalid ticket payload for ticket {id}")
+        if ANSWERED_THROUGH_ATTRIBUTE not in data:
+            # Without the attribute the marker can't be stored, and every event would answer the whole history again.
+            raise ZammadMissingTicketAttributeError(
+                f"Ticket attribute {ANSWERED_THROUGH_ATTRIBUTE} does not exist in Zammad; "
+                "create it (zammad-infra configure-zammad-ai-ticket-attribute.rb) or set conversation.enabled: false"
+            )
         return ticket.model_copy(
             update={
                 "group_id": data.get("group_id"),
                 "owner_id": data.get("owner_id"),
-                "ai_answered_through_article_id": data.get("ai_answered_through_article_id"),
+                "ai_answered_through_article_id": data[ANSWERED_THROUGH_ATTRIBUTE],
                 "tags": await self.get_ticket_tags(ticket_id=id),
             }
         )
@@ -163,6 +184,16 @@ class ZammadAPIClient(BaseZammadClient):
                 raise ZammadPayloadParseError("Invalid payload for the current Zammad user")
             self._own_user_id = data["id"]
         return self._own_user_id
+
+    @override
+    async def set_answered_through(self, ticket_id: int, article_id: int) -> None:
+        await self._request("PUT", f"/api/v1/tickets/{ticket_id}", json={ANSWERED_THROUGH_ATTRIBUTE: article_id})
+        logger.info(f"Recorded customer article {article_id} as answered on ticket {ticket_id}")
+
+    @override
+    async def remove_tag_from_ticket(self, ticket_id: int, tag: str) -> None:
+        await self._request("POST", "/api/v1/tags/remove", json={"object": "Ticket", "o_id": ticket_id, "item": tag})
+        logger.info(f"Removed tag '{tag}' from ticket {ticket_id}")
 
     @override
     async def get_ticket_tags(self, ticket_id: int) -> list[str]:

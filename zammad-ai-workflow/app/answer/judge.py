@@ -21,6 +21,16 @@ from app.utils.logging import getLogger
 logger: Logger = getLogger("zammad-ai.answer.judge")
 
 
+def judge_message(question: str, answer: str, documents: list[dict[str, Any]], sources: str | None) -> str:
+    """Build the judge input: the retrieved documents' content, plus the titles the answer cites."""
+    if sources is None:
+        return f"Question: {question}\n\nAnswer: {answer}\n\nDocuments: {documents}"
+    cited = ", ".join(str(document.get("title", "")) for document in documents) or "none"
+    return (
+        f"Question: {question}\n\nAnswer: {answer}\n\nCited by the answer: {cited}\n\nRetrieved documents:\n\n{sources}"
+    )
+
+
 class JudgeHandler:
     """Judge generated answers with a structured LLM response."""
 
@@ -56,18 +66,23 @@ class JudgeHandler:
         answer: str,
         documents: list[dict[str, Any]],
         session_id: str | None = None,
+        sources: str | None = None,
     ) -> JudgeResult:
-        """Judge an answer and return the structured result."""
+        """Judge an answer against the retrieved documents' content and return the structured result.
+
+        Args:
+            question: The customer's question.
+            answer: The answer to judge.
+            documents: Documents the answer cites (title and URL).
+            session_id: Optional Langfuse session ID.
+            sources: The retrieved documents' content, rendered for the judge.
+        """
         session_id, config = self._build_runnable_config(session_id=session_id)
 
         try:
             with propagate_attributes(session_id=session_id):
                 agent_result: dict[str, Any] = await self._judge_agent.ainvoke(
-                    input={
-                        "messages": [
-                            HumanMessage(content=f"Question: {question}\n\nAnswer: {answer}\n\nDocuments: {documents}")
-                        ],
-                    },
+                    input={"messages": [HumanMessage(content=judge_message(question, answer, documents, sources))]},
                     config=config,
                 )
             return extract_structured_response(agent_result, JudgeResult)

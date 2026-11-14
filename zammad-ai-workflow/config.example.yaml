@@ -179,6 +179,8 @@ answer:
       type: "file" # Options: "string", "file", "langfuse"
       prompt: "prompts/answer/repair.prompt.md"
     max_repairs: 0
+    max_documents: 10 # retrieved documents the judge checks the answer against
+    max_document_chars: 4000 # each document is cut to this length for the judge
   ai_answer_disclaimer: "" # Optional: disclaimer text for AI-generated answers
 
 # ============================================================================
@@ -225,6 +227,17 @@ max_user_text_length: 2000
 
 # Maximum recursion depth for agents to prevent infinite tool calling loops.
 # recursion_limit: 30
+
+# ============================================================================
+# Conversation Configuration
+# ============================================================================
+# Answer each unanswered customer turn once, and stay out once a person is involved.
+# Requires zammad.type: api and the ai_answered_through_article_id ticket attribute.
+conversation:
+  enabled: true
+  resume_tag: ai_resume # an agent adds this tag to hand a ticket back to the AI
+  quiet_seconds: 10 # answer once the newest customer message is this old; 0 answers at once
+  max_wait_seconds: 60 # answer at the latest this long after the turn's first message
 
 # ============================================================================
 # Localization Configuration

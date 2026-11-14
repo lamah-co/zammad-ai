@@ -12,6 +12,7 @@ from langfuse import observe, propagate_attributes
 from langgraph.graph.state import CompiledStateGraph
 from prometheus_client import Gauge, Histogram
 
+from app.answer.retrieval import collect_retrieved_documents, judge_sources
 from app.errors import AnswerServiceError, AppError
 from app.models.answer import AnswerCandidate, NoAnswerPossible
 from app.observe import LangfuseClient, LangfuseError
@@ -229,35 +230,38 @@ class AnswerService:
                 if self.langfuse_client is not None
                 else RunnableConfig()
             )
-            with propagate_attributes(session_id=session_id):
-                if self.answer_strategy == "direct_rag":
-                    agent_result = await self._generate_direct_rag(
-                        user_text=user_text,
-                        category=category,
-                        config=config,
-                        language=language,
-                    )
-                else:
-                    if self.agent is None:
-                        raise AnswerServiceError("Answer agent is not initialized", retryable=False)
-                    agent_result = await self.agent.ainvoke(
-                        input={"messages": [user_message]},
-                        config=with_recursion_limit(config),
-                        context=self.agent_context,
-                    )
+            # Record what retrieval returns, so the judge checks the answer against the documents' content.
+            with collect_retrieved_documents() as retrieved:
+                with propagate_attributes(session_id=session_id):
+                    if self.answer_strategy == "direct_rag":
+                        agent_result = await self._generate_direct_rag(
+                            user_text=user_text,
+                            category=category,
+                            config=config,
+                            language=language,
+                        )
+                    else:
+                        if self.agent is None:
+                            raise AnswerServiceError("Answer agent is not initialized", retryable=False)
+                        agent_result = await self.agent.ainvoke(
+                            input={"messages": [user_message]},
+                            config=with_recursion_limit(config),
+                            context=self.agent_context,
+                        )
 
-            agent_structured_response: AnswerCandidate | NoAnswerPossible = extract_structured_response(
-                agent_result,
-                (AnswerCandidate, NoAnswerPossible),
-            )
-            structured_response: AnswerCandidate | NoAnswerPossible = await self._judge_and_repair(
-                user_text=user_text,
-                category=category,
-                user_message=user_message,
-                structured_response=agent_structured_response,
-                session_id=session_id,
-                config=config,
-            )
+                agent_structured_response: AnswerCandidate | NoAnswerPossible = extract_structured_response(
+                    agent_result,
+                    (AnswerCandidate, NoAnswerPossible),
+                )
+                structured_response: AnswerCandidate | NoAnswerPossible = await self._judge_and_repair(
+                    user_text=user_text,
+                    category=category,
+                    user_message=user_message,
+                    structured_response=agent_structured_response,
+                    session_id=session_id,
+                    config=config,
+                    retrieved=retrieved,
+                )
             if isinstance(structured_response, NoAnswerPossible):
                 outcome = "no_answer"
             else:
@@ -335,8 +339,12 @@ class AnswerService:
         structured_response: AnswerCandidate | NoAnswerPossible,
         session_id: str | None,
         config: RunnableConfig,
+        retrieved: list[Document] | None = None,
     ) -> AnswerCandidate | NoAnswerPossible:
-        """Run judgment and optionally repair a response that failed checks."""
+        """Run judgment and optionally repair a response that failed checks.
+
+        `retrieved` holds every document retrieval returned so far; repairs add theirs to it.
+        """
         if isinstance(structured_response, NoAnswerPossible):
             return structured_response
 
@@ -354,6 +362,11 @@ class AnswerService:
                 answer=structured_response.response,
                 documents=[document.model_dump() for document in structured_response.documents],
                 session_id=session_id,
+                sources=judge_sources(
+                    retrieved or [],
+                    max_documents=self.judge_settings.max_documents,
+                    max_chars=self.judge_settings.max_document_chars,
+                ),
             )
 
             if self._is_judged_ok(judgment):
