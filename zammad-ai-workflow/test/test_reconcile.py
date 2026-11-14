@@ -182,6 +182,7 @@ def _action_service() -> tuple[ActionService, SimpleNamespace]:
             no_answer_internal_note="Review",
             human_review_tag="ai_human_review",
             no_answer_tag="ai_no_answer",
+            draft_tag="ai_draft",
             handoff_ticket_state=None,
             no_category_name="Unknown",
         ),
@@ -224,14 +225,17 @@ async def test_published_answer_writes_the_marker_in_the_same_request() -> None:
 
 @pytest.mark.asyncio
 async def test_shared_draft_marks_the_turn_as_handled() -> None:
-    """A draft for an agent still records the turn, so the next event does not draft it again."""
+    """A draft is acknowledged to the customer with the turn marker, then tagged, so it is not drafted again."""
     service, client = _action_service()
     service.get_answer = AsyncMock(return_value=StaticAnswer(response="Answer text"))
 
     await service.execute_action(ticket_id=42, triage=_static_triage(auto_publish=False), answered_through=9)
 
     client.post_shared_draft.assert_awaited_once()
-    client.set_answered_through.assert_awaited_once_with(ticket_id=42, article_id=9)
+    assert client.post_answer.call_args.kwargs["text"] == "We will get back to you."
+    assert client.post_answer.call_args.kwargs["answered_through"] == 9
+    client.set_answered_through.assert_not_called()
+    client.add_tag_to_ticket.assert_awaited_once_with(ticket_id=42, tag="ai_draft")
 
 
 @pytest.mark.asyncio
@@ -339,3 +343,32 @@ async def test_missing_ticket_attribute_posts_nothing(
     services.action.execute_action.assert_not_called()
     services.action.hand_off_failed_ticket.assert_not_called()
     assert services.triage.zammad_client.get_ticket_with_context.await_count <= 2
+
+
+@pytest.mark.asyncio
+async def test_held_draft_is_acknowledged_in_the_customers_language() -> None:
+    """An Arabic customer whose answer is held for review gets the Arabic acknowledgement, once."""
+    service, client = _action_service()
+    service.settings.triage.human_review_public_fallback = {"ar": "سنعود إليك قريباً.", "en": "We will get back to you."}
+    service.settings.triage.public_reply_subject = {"ar": "الرد على طلبك", "en": "Answer"}
+    service.get_answer = AsyncMock(return_value=StaticAnswer(response="Answer text"))
+    triage = _static_triage(auto_publish=False).model_copy(update={"language": "ar"})
+
+    await service.execute_action(ticket_id=42, triage=triage, answered_through=9)
+
+    assert client.post_answer.await_count == 1
+    assert client.post_answer.call_args.kwargs["text"] == "سنعود إليك قريباً."
+
+
+@pytest.mark.asyncio
+async def test_ticket_with_a_draft_for_review_is_left_to_the_agent(
+    services: SimpleNamespace, settings_factory: Callable, kafka_message_factory: Callable
+) -> None:
+    """While an agent reviews the AI's draft, a new customer message is not answered by the AI."""
+    services.set_ticket(
+        ZammadTicket(id=3720, tags=["ai_draft"], ai_answered_through_article_id=1, articles=[customer(1), customer(2)])
+    )
+
+    await handle(settings_factory, kafka_message_factory)
+
+    services.triage.perform_triage.assert_not_called()

@@ -98,8 +98,14 @@ class ActionService:
                         answered_through=answered_through,
                     )
                 except UnsupportedReplyChannelError as error:
-                    await self.zammad_client.post_shared_draft(ticket_id=ticket_id, text=response.response)
-                    await self._record_answered(ticket_id, answered_through)
+                    # The acknowledgement can't be delivered on this channel either, and we never switch channels.
+                    await self._save_draft(
+                        ticket_id=ticket_id,
+                        text=response.response,
+                        language=triage.language,
+                        answered_through=answered_through,
+                        acknowledge=False,
+                    )
                     self.logger.warning(f"Saved answer as shared draft for ticket {ticket_id}: {error}")
                     return
                 self.logger.info(f"Posted answer for ticket {ticket_id} with category {category}")
@@ -115,11 +121,13 @@ class ActionService:
                     # Don't fail the action execution if scheduling fails — just log
                     self.logger.error("Failed to schedule pending-close update for ticket.", exc_info=True)
             else:
-                await self.zammad_client.post_shared_draft(
+                await self._save_draft(
                     ticket_id=ticket_id,
                     text=response.response,
+                    language=triage.language,
+                    answered_through=answered_through,
+                    acknowledge=True,
                 )
-                await self._record_answered(ticket_id, answered_through)
                 self.logger.info(f"Posted shared draft for ticket {ticket_id} with category {category}")
         except AppError:
             raise
@@ -285,6 +293,34 @@ class ActionService:
             await self.zammad_client.post_answer(
                 ticket_id=ticket_id, text=text, subject=subject, internal=False, answered_through=answered_through
             )
+
+    async def _save_draft(
+        self, *, ticket_id: int, text: str, language: str | None, answered_through: int | None, acknowledge: bool
+    ) -> None:
+        """Save the answer for an agent, tell the customer someone will follow up, and tag the ticket last."""
+        await self.zammad_client.post_shared_draft(ticket_id=ticket_id, text=text)
+        acknowledgement = (
+            resolve_localized_text(
+                self.settings.triage.human_review_public_fallback,
+                language=language,
+                settings=self.settings.localization,
+            )
+            if acknowledge
+            else None
+        )
+        if acknowledgement:
+            await self._post_public(
+                ticket_id=ticket_id,
+                text=acknowledgement,
+                subject=self._public_subject(language),
+                answered_through=answered_through,
+            )
+            self.logger.info(f"Acknowledged draft for ticket {ticket_id}")
+        else:
+            await self._record_answered(ticket_id, answered_through)
+        draft_tag: str | None = self.settings.triage.draft_tag
+        if draft_tag:
+            await self.zammad_client.add_tag_to_ticket(ticket_id=ticket_id, tag=draft_tag)
 
     async def _record_answered(self, ticket_id: int, answered_through: int | None) -> None:
         """Record the turn as handled when its outcome wrote no customer-visible article."""

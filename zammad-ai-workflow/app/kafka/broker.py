@@ -128,7 +128,12 @@ def build_router(settings: ZammadAISettings) -> tuple[KafkaRouter, Callable]:
     rechecks: RecheckScheduler = RecheckScheduler()
     handoff_tags: tuple[str, ...] = tuple(
         tag
-        for tag in (settings.triage.human_review_tag, settings.triage.no_answer_tag, settings.triage.failed_tag)
+        for tag in (
+            settings.triage.human_review_tag,
+            settings.triage.no_answer_tag,
+            settings.triage.failed_tag,
+            settings.triage.draft_tag,
+        )
         if tag
     )
 

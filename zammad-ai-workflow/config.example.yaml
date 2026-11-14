@@ -275,6 +275,7 @@ triage:
   #   en: "Your request has been received. A team member will follow up with you as soon as possible."
   # human_review_internal_note: "Human review for {category}: {reason}"
   # human_review_tag: ai_human_review
+  # draft_tag: ai_draft # answer saved as a draft; the customer gets human_review_public_fallback
   # handoff_ticket_state: open
   # Category setup: Define the categories for ticket classification
   # Each category requires only a unique name.
