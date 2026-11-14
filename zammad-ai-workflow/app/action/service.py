@@ -42,8 +42,21 @@ class ActionService:
         else:
             raise ActionExecutionError("Invalid type for Zammad settings in configuration", retryable=False)
 
-    async def execute_action(self, ticket_id: int, triage: TriageResult, session_id: str | None = None) -> None:
-        """Run the configured action for a ticket and publish or draft the answer."""
+    async def execute_action(
+        self,
+        ticket_id: int,
+        triage: TriageResult,
+        session_id: str | None = None,
+        answered_through: int | None = None,
+    ) -> None:
+        """Run the configured action for a ticket and publish or draft the answer.
+
+        Args:
+            ticket_id: Ticket to act on.
+            triage: Triage result that selects the action.
+            session_id: Optional Langfuse session ID.
+            answered_through: Newest customer article of the turn. When set, every outcome records it on the ticket.
+        """
         try:
             category: str = triage.category.name
             action: str = triage.action.name
@@ -70,21 +83,23 @@ class ActionService:
                         category == self.settings.triage.no_category_name or triage.action.type == ActionTypes.NoAction
                     ),
                     language=triage.language,
+                    answered_through=answered_through,
                 )
             elif triage.category.auto_publish and (
                 isinstance(response, StaticAnswer) or (isinstance(response, AnswerCandidate) and response.auto_publish)
             ):
                 try:
-                    await self.zammad_client.post_answer(
+                    await self._post_public(
                         ticket_id=ticket_id,
                         text=response.response,
                         subject=response.subject
                         if isinstance(response, AnswerCandidate)
                         else self._public_subject(triage.language),
-                        internal=False,
+                        answered_through=answered_through,
                     )
                 except UnsupportedReplyChannelError as error:
                     await self.zammad_client.post_shared_draft(ticket_id=ticket_id, text=response.response)
+                    await self._record_answered(ticket_id, answered_through)
                     self.logger.warning(f"Saved answer as shared draft for ticket {ticket_id}: {error}")
                     return
                 self.logger.info(f"Posted answer for ticket {ticket_id} with category {category}")
@@ -104,6 +119,7 @@ class ActionService:
                     ticket_id=ticket_id,
                     text=response.response,
                 )
+                await self._record_answered(ticket_id, answered_through)
                 self.logger.info(f"Posted shared draft for ticket {ticket_id} with category {category}")
         except AppError:
             raise
@@ -259,7 +275,25 @@ class ActionService:
             global _service
             _service = None
 
-    async def hand_off_failed_ticket(self, *, ticket_id: int, reason: str, customer_message: str) -> bool:
+    async def _post_public(
+        self, *, ticket_id: int, text: str, subject: str | None, answered_through: int | None
+    ) -> None:
+        """Post a customer-visible answer, writing the turn marker in the same request when there is one."""
+        if answered_through is None:
+            await self.zammad_client.post_answer(ticket_id=ticket_id, text=text, subject=subject, internal=False)
+        else:
+            await self.zammad_client.post_answer(
+                ticket_id=ticket_id, text=text, subject=subject, internal=False, answered_through=answered_through
+            )
+
+    async def _record_answered(self, ticket_id: int, answered_through: int | None) -> None:
+        """Record the turn as handled when its outcome wrote no customer-visible article."""
+        if answered_through is not None:
+            await self.zammad_client.set_answered_through(ticket_id=ticket_id, article_id=answered_through)
+
+    async def hand_off_failed_ticket(
+        self, *, ticket_id: int, reason: str, customer_message: str, answered_through: int | None = None
+    ) -> bool:
         """Hand a ticket that could not be processed to a human, with the customer acknowledgement.
 
         Returns:
@@ -279,6 +313,7 @@ class ActionService:
             language=guess_language(customer_message, self.settings.localization),
             internal_note_override=self.settings.triage.failed_internal_note,
             tag_override=failed_tag,
+            answered_through=answered_through,
         )
         return True
 
@@ -294,6 +329,7 @@ class ActionService:
         language: str | None,
         internal_note_override: str | None = None,
         tag_override: str | None = None,
+        answered_through: int | None = None,
     ) -> None:
         """Notify the customer and surface unresolved tickets for agent follow-up."""
         public_fallback = (
@@ -340,13 +376,15 @@ class ActionService:
         )
 
         if public_fallback_text:
-            await self.zammad_client.post_answer(
+            await self._post_public(
                 ticket_id=ticket_id,
                 text=public_fallback_text,
                 subject=self._public_subject(language),
-                internal=False,
+                answered_through=answered_through,
             )
             self.logger.info(f"Posted handoff acknowledgement for ticket {ticket_id} with category {category}")
+        else:
+            await self._record_answered(ticket_id, answered_through)
 
         # The tag goes last: it marks the hand-off as complete, so a retry after a crash still acknowledges.
         if tag:
