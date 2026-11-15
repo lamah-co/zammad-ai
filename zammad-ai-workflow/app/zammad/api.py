@@ -192,7 +192,7 @@ class ZammadAPIClient(BaseZammadClient):
 
     @override
     async def remove_tag_from_ticket(self, ticket_id: int, tag: str) -> None:
-        await self._request("POST", "/api/v1/tags/remove", json={"object": "Ticket", "o_id": ticket_id, "item": tag})
+        await self._request("DELETE", "/api/v1/tags/remove", json={"object": "Ticket", "o_id": ticket_id, "item": tag})
         logger.info(f"Removed tag '{tag}' from ticket {ticket_id}")
 
     @override
