@@ -307,7 +307,7 @@ async def test_api_client_marker_and_tag_removal_payloads() -> None:
 
     assert (requests[0].method, requests[0].url.path) == ("PUT", "/api/v1/tickets/42")
     assert json.loads(requests[0].content) == {"ai_answered_through_article_id": 17}
-    assert (requests[1].method, requests[1].url.path) == ("POST", "/api/v1/tags/remove")
+    assert (requests[1].method, requests[1].url.path) == ("DELETE", "/api/v1/tags/remove")
     assert json.loads(requests[1].content) == {"object": "Ticket", "o_id": 42, "item": "ai_resume"}
 
 
